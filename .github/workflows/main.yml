@@ -36,7 +36,12 @@ jobs:
       - name: Run unit tests
         run: |
           docker run --rm \
-            python -m unittest discover -s tests -t .
+            --entrypoint python \
+            -v "${{ github.workspace }}:/work" \
+            -w /work \
+            demo-flask:${{ github.sha }} \
+            -m unittest discover -s tests -t .
+
 
   integration-test:
     name: Integration Tests
@@ -49,6 +54,11 @@ jobs:
 
       - name: Build image
         run: docker build -t demo-flask:integration .
+
+      # - name: Integration test
+      #   run: |
+      #     docker run --rm demo-flask:${{ github.sha }} \
+      #       python -c "import flask; print('OK')"
 
       - name: Flask import test
         run: |
