@@ -76,21 +76,19 @@ jobs:
       - name: Load Docker image
         run: docker load -i image.tar
 
-      - name: Login to Docker Hub
+      - name: Deploy to Server
+        env:  
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_IP: ${{ secrets.SERVER_IP }}
         run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | \
-          docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-
-      - name: Tag image
-        run: |
-          docker tag demo-flask:${{ github.sha }} \
-            ${{ secrets.DOCKERHUB_USERNAME }}/demo-flask:latest
-          docker tag demo-flask:${{ github.sha }} \
-            ${{ secrets.DOCKERHUB_USERNAME }}/demo-flask:${{ github.sha }}
-
-      - name: Push image
-        run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/demo-flask:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/demo-flask:${{ github.sha }}
+          echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - > /dev/null
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP << 'EOF'
+            docker load -i image.tar
+            docker stop flask_app || true
+            docker rm flask_app || true
+            docker run -d --name flask_app -p 80:5000 demo-flask:${{ github.sha }}
+          EOF 
+          
 
 
