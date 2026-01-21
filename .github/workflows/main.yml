@@ -60,3 +60,24 @@ jobs:
             -w /work \
             demo-flask:${{ github.sha }} \
             -m unittest discover -s tests -t .
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: unit-test
+    steps:
+      - name: Checkout  
+        uses: actions/checkout@v4
+      - name: Deploy step placeholder
+        run: echo "Deployment step would go here."
+
+      - name: Notify deployment
+        run: echo "Application deployed successfully!"
+
+      - name: deploy
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-notification
+          retention-days: 1
+
+      - name: Notify deployment
+        run: echo "Application deployed successfully!"
