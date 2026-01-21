@@ -82,28 +82,26 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SERVER_IP: ${{ secrets.SERVER_IP }}
         run: |
-          # Start ssh-agent so ssh-add works
-          eval "$(ssh-agent -s)"
+          set -e
 
-          # Add private key
-          echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
-
-          # Add server to known_hosts (avoids interactive prompt)
           mkdir -p ~/.ssh
+
+          # Write key exactly as stored in secret
+          printf "%s\n" "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # Avoid host prompt
           ssh-keyscan -H "$SERVER_IP" >> ~/.ssh/known_hosts
 
-          # Upload image.tar to server
-          scp image.tar $SERVER_USER@$SERVER_IP:/tmp/image.tar
+          # Copy artifact to server
+          scp -i ~/.ssh/id_rsa image.tar $SERVER_USER@$SERVER_IP:/tmp/image.tar
 
-          # Load and run on server
-          ssh $SERVER_USER@$SERVER_IP << EOF
+          # Load + run
+          ssh -i ~/.ssh/id_rsa $SERVER_USER@$SERVER_IP << EOF
+            set -e
             docker load -i /tmp/image.tar
             docker stop flask_app || true
             docker rm flask_app || true
             docker run -d --name flask_app -p 80:5000 demo-flask:${{ github.sha }}
             rm -f /tmp/image.tar
           EOF
-
-
-
-
