@@ -36,9 +36,6 @@ jobs:
       - name: Run unit tests
         run: |
           docker run --rm \
-            -v "${{ github.workspace }}:/work" \
-            -w /work \
-            demo-flask:${{ github.sha }} \
             python -m unittest discover -s tests -t .
 
   integration-test:
