@@ -8,4 +8,19 @@ pipeline {
       }
     }
   }
+
+  stages {
+    stage('Build') {
+      steps {
+        echo 'Building the application...'
+      }
+    }
+  }
+    stages {
+        stage('Deploy') {
+        steps {
+            echo 'Deploying the application...'
+        }
+        }
+    }
 }
