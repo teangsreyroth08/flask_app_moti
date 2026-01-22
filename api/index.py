@@ -9,16 +9,19 @@ app = Flask(__name__)
 # ENV + PATHS
 # ============================================================
 
-IS_SERVERLESS = os.environ.get("VERCEL") == "1"
-POSTGRES_URL = os.environ.get("POSTGRES_URL")
+# Vercel sets VERCEL in serverless env; treat any truthy value as serverless
+IS_SERVERLESS = bool(os.environ.get("VERCEL"))
+
+# Prefer NON_POOLING for direct connections if you use Vercel Postgres
+POSTGRES_URL = os.environ.get("POSTGRES_URL_NON_POOLING") or os.environ.get("POSTGRES_URL")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # If you have: project/images/...
-LOCAL_IMAGES_DIR = os.path.join(BASE_DIR, "images")
+LOCAL_IMAGES_DIR = os.path.join(os.path.dirname(BASE_DIR), "images")
 
 # If you deploy to Vercel and use: project/public/images/...
-PUBLIC_IMAGES_DIR = os.path.join(BASE_DIR, "public", "images")
+PUBLIC_IMAGES_DIR = os.path.join(os.path.dirname(BASE_DIR), "public", "images")
 
 # Choose images directory automatically:
 # - If /public/images exists -> use it (Vercel-friendly)
@@ -41,6 +44,8 @@ DEFAULT_QUOTES = [
 # ============================================================
 # DATABASE SETUP
 # ============================================================
+
+HAS_DATABASE = False
 
 if POSTGRES_URL:
     # Use Postgres (e.g., Vercel Postgres)
@@ -81,7 +86,7 @@ if POSTGRES_URL:
                             )
                     conn.commit()
             except Exception as e:
-                print(f"⚠️ DB init error: {e}")
+                print(f"⚠️ DB init error (Postgres): {e}")
 
         def load_quotes():
             try:
@@ -90,7 +95,7 @@ if POSTGRES_URL:
                     cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
                     return [(row[0], row[1]) for row in cursor.fetchall()]
             except Exception as e:
-                print(f"⚠️ Load error: {e}")
+                print(f"⚠️ Load error (Postgres): {e}")
                 return list(DEFAULT_QUOTES)
 
         def save_quote(quote, author):
@@ -112,17 +117,18 @@ if POSTGRES_URL:
 
         HAS_DATABASE = True
 
-    except ImportError:
-        print("⚠️ psycopg2 not installed - using in-memory fallback")
+    except Exception as e:
+        print(f"⚠️ Postgres setup error: {e}")
         HAS_DATABASE = False
 
 else:
-    # Use SQLite (local) or /tmp (serverless) as fallback
+    # Use SQLite fallback
     try:
         import sqlite3
         from contextlib import contextmanager
 
-        DB_FILE = "/tmp/quotes.db" if IS_SERVERLESS else os.path.join(BASE_DIR, "quotes.db")
+        # IMPORTANT: on serverless, write only to /tmp
+        DB_FILE = "/tmp/quotes.db" if IS_SERVERLESS else os.path.join(os.path.dirname(BASE_DIR), "quotes.db")
 
         @contextmanager
         def get_db():
@@ -157,7 +163,7 @@ else:
                             )
                     conn.commit()
             except Exception as e:
-                print(f"⚠️ DB init error: {e}")
+                print(f"⚠️ DB init error (SQLite): {e}")
 
         def load_quotes():
             try:
@@ -166,7 +172,7 @@ else:
                     cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
                     return [(row["quote"], row["author"]) for row in cursor.fetchall()]
             except Exception as e:
-                print(f"⚠️ Load error: {e}")
+                print(f"⚠️ Load error (SQLite): {e}")
                 return list(DEFAULT_QUOTES)
 
         def save_quote(quote, author):
@@ -188,7 +194,7 @@ else:
         HAS_DATABASE = True
 
     except Exception as e:
-        print(f"⚠️ SQLite error: {e}")
+        print(f"⚠️ SQLite setup error: {e}")
         HAS_DATABASE = False
 
 
@@ -212,6 +218,7 @@ if not HAS_DATABASE:
         return any(q.lower() == quote.lower() for q, _ in QUOTES_STORE)
 
 
+# Initialize once on cold start
 try:
     init_db()
 except Exception as e:
@@ -220,6 +227,18 @@ except Exception as e:
 # ============================================================
 # ROUTES
 # ============================================================
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    # Helpful to debug on Vercel
+    return jsonify({
+        "ok": True,
+        "is_serverless": IS_SERVERLESS,
+        "has_postgres_url": bool(POSTGRES_URL),
+        "images_dir": IMAGES_DIR,
+        "has_database": HAS_DATABASE,
+    })
+
 
 @app.route("/images/<path:filename>")
 def images(filename):
@@ -311,7 +330,12 @@ def home():
 
         # Example mascot image (optional):
         # Put file: images/meow.jpg  OR  public/images/meow.jpg
-        mascot_img_tag = '<img src="/images/meow.jpg" alt="cat"/>' if os.path.isfile(os.path.join(IMAGES_DIR, "meow.jpg")) else '<div style="font-size:clamp(60px,12vw,80px)">🐱</div>'
+        mascot_path = os.path.join(IMAGES_DIR, "meow.jpg")
+        mascot_img_tag = (
+            '<img src="/images/meow.jpg" alt="cat"/>'
+            if os.path.isfile(mascot_path)
+            else '<div style="font-size:clamp(60px,12vw,80px)">🐱</div>'
+        )
 
         html = r"""
 <!DOCTYPE html>
@@ -486,11 +510,11 @@ addForm.addEventListener("submit",async e=>{
         html = html.replace("__COUNT__", str(len(quotes)))
 
         if POSTGRES_URL:
-            db_type = "PG"
+            db_type = ""
         elif IS_SERVERLESS:
             db_type = "tmp"
         else:
-            db_type = "SQLite"
+            db_type = "local"
         html = html.replace("__DB_TYPE__", db_type)
 
         html = html.replace("__MASCOT__", mascot_img_tag)
@@ -504,11 +528,6 @@ addForm.addEventListener("submit",async e=>{
         return f"Error: {str(e)}", 500
 
 
-# Vercel serverless handler (optional)
-def handler(request, context=None):
-    with app.request_context(request.environ):
-        return app.full_dispatch_request()
-
-
+# Local run (NOT used on Vercel)
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

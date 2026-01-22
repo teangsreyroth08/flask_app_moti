@@ -1,15 +1,31 @@
 FROM python:3.11-slim
 
+# Prevent Python from writing .pyc files & enable logs
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Set working directory
 WORKDIR /app
 
+# Install system dependencies (needed for psycopg2)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies first (better caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-
+# Copy application code
 COPY . .
 
-# App start command (overrideable in CI)
-CMD ["python", "app.py"]
+# Flask environment
+ENV FLASK_APP=api.index
+ENV FLASK_ENV=production
+ENV PORT=5000
+
+EXPOSE 5000
+
+# Start Flask
+CMD ["python", "-m", "flask", "run", "--host=0.0.0.0", "--port=5000"]

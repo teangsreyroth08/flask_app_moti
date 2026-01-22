@@ -1,8 +1,29 @@
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  web:
+    build: .
+    container_name: motivation_web
     ports:
       - "8000:5000"
+    env_file:
+      - .env
+    depends_on:
+      - db
+    volumes:
+      - .:/app:cached
+    restart: unless-stopped
 
+  db:
+    image: postgres:16-alpine
+    container_name: motivation_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: quotesdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
