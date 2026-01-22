@@ -2,9 +2,9 @@ name: CI-CD
 
 on:
   push:
-    branches: ["jenkinsdocker"]
+    branches: ["main"]
   pull_request:
-    branches: ["jenkinsdocker"]
+    branches: ["main"]
 
 jobs:
   build:
