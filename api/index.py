@@ -38,7 +38,7 @@ DEFAULT_QUOTES = [
     ("Progress, not perfection.", "Unknown"),
     ("It always seems impossible until it's done.", "Nelson Mandela"),
     ("Start where you are. Use what you have. Do what you can.", "Arthur Ashe"),
-    ("Dream big. Start small. Act now.", "Robin Sharma"),
+    ("The only way to do great work is to love what you do.", "Steve Jobs"),
 ]
 
 # ============================================================
