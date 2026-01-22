@@ -1,16 +1,14 @@
 from flask import Flask, request, redirect, send_from_directory, jsonify
-import sqlite3
 import random
 import json
 import os
 from datetime import datetime
-from contextlib import contextmanager
 
 app = Flask(__name__)
 
-# Database setup
-DB_FILE = os.path.join(app.root_path, "quotes.db")
-QUOTES_JSON_FILE = os.path.join(app.root_path, "quotes.json")
+# Environment detection
+IS_SERVERLESS = os.environ.get('VERCEL') == '1'
+POSTGRES_URL = os.environ.get('POSTGRES_URL')
 
 DEFAULT_QUOTES = [
     ("Believe you can and you're halfway there.", "Theodore Roosevelt"),
@@ -25,117 +23,152 @@ DEFAULT_QUOTES = [
     ("Dream big. Start small. Act now.", "Robin Sharma"),
 ]
 
-@contextmanager
-def get_db():
-    """Context manager for database connections"""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
+# ============================================================
+# DATABASE SETUP - Works both locally and on Vercel
+# ============================================================
 
-def init_db():
-    """Initialize database with schema and migrate from JSON if needed"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        
-        # Create quotes table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS quotes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                quote TEXT NOT NULL UNIQUE,
-                author TEXT NOT NULL DEFAULT 'Unknown',
-                is_default BOOLEAN NOT NULL DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Check if we need to migrate
-        cursor.execute("SELECT COUNT(*) as count FROM quotes")
-        count = cursor.fetchone()['count']
-        
-        if count == 0:
-            # First run - insert defaults
-            for quote, author in DEFAULT_QUOTES:
-                cursor.execute(
-                    "INSERT OR IGNORE INTO quotes (quote, author, is_default) VALUES (?, ?, 1)",
-                    (quote, author)
+if POSTGRES_URL:
+    # Use Vercel Postgres (production)
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from contextlib import contextmanager
+    
+    @contextmanager
+    def get_db():
+        conn = psycopg2.connect(POSTGRES_URL)
+        try:
+            yield conn
+        finally:
+            conn.close()
+    
+    def init_db():
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS quotes (
+                    id SERIAL PRIMARY KEY,
+                    quote TEXT NOT NULL UNIQUE,
+                    author TEXT NOT NULL DEFAULT 'Unknown',
+                    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+            """)
             
-            # Migrate from old JSON file if exists
-            if os.path.exists(QUOTES_JSON_FILE):
-                try:
-                    with open(QUOTES_JSON_FILE, "r", encoding="utf-8") as f:
-                        old_quotes = json.load(f)
-                    
-                    if isinstance(old_quotes, list):
-                        migrated = 0
-                        for item in old_quotes:
-                            q = (item.get("quote") or "").strip()
-                            a = (item.get("author") or "Unknown").strip() or "Unknown"
-                            if q:
-                                try:
-                                    cursor.execute(
-                                        "INSERT INTO quotes (quote, author, is_default) VALUES (?, ?, 0)",
-                                        (q, a)
-                                    )
-                                    migrated += 1
-                                except sqlite3.IntegrityError:
-                                    pass  # Skip duplicates
-                        
-                        if migrated > 0:
-                            print(f"✨ Migrated {migrated} quotes from JSON to database")
-                    
-                    # Backup and remove old file
-                    backup_name = f"quotes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                    os.rename(QUOTES_JSON_FILE, os.path.join(app.root_path, backup_name))
-                    print(f"📦 Old JSON backed up as {backup_name}")
-                
-                except Exception as e:
-                    print(f"⚠️ Migration warning: {e}")
-        
-        conn.commit()
-        print(f"✅ Database initialized with {cursor.execute('SELECT COUNT(*) FROM quotes').fetchone()[0]} quotes")
+            cursor.execute("SELECT COUNT(*) FROM quotes")
+            count = cursor.fetchone()[0]
+            
+            if count == 0:
+                for quote, author in DEFAULT_QUOTES:
+                    cursor.execute(
+                        "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, TRUE) ON CONFLICT (quote) DO NOTHING",
+                        (quote, author)
+                    )
+            
+            conn.commit()
+            cursor.execute("SELECT COUNT(*) FROM quotes")
+            print(f"✅ Postgres initialized with {cursor.fetchone()[0]} quotes")
+    
+    def load_quotes():
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
+            return [(row[0], row[1]) for row in cursor.fetchall()]
+    
+    def save_quote(quote, author):
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, FALSE) RETURNING id",
+                (quote, author)
+            )
+            conn.commit()
+            return cursor.fetchone()[0]
+    
+    def quote_exists(quote):
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM quotes WHERE LOWER(quote) = LOWER(%s)", (quote,))
+            return cursor.fetchone()[0] > 0
 
-def load_quotes():
-    """Load all quotes from database"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
-        return [(row['quote'], row['author']) for row in cursor.fetchall()]
-
-def save_quote(quote, author):
-    """Save a new quote to database"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO quotes (quote, author, is_default) VALUES (?, ?, 0)",
-            (quote, author)
-        )
-        conn.commit()
-        return cursor.lastrowid
-
-def quote_exists(quote):
-    """Check if quote already exists (case-insensitive)"""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) as count FROM quotes WHERE LOWER(quote) = LOWER(?)", (quote,))
-        return cursor.fetchone()['count'] > 0
+else:
+    # Use SQLite (local development)
+    import sqlite3
+    from contextlib import contextmanager
+    
+    DB_FILE = os.path.join(app.root_path, "quotes.db")
+    
+    @contextmanager
+    def get_db():
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+    
+    def init_db():
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS quotes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    quote TEXT NOT NULL UNIQUE,
+                    author TEXT NOT NULL DEFAULT 'Unknown',
+                    is_default BOOLEAN NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("SELECT COUNT(*) as count FROM quotes")
+            count = cursor.fetchone()['count']
+            
+            if count == 0:
+                for quote, author in DEFAULT_QUOTES:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO quotes (quote, author, is_default) VALUES (?, ?, 1)",
+                        (quote, author)
+                    )
+            
+            conn.commit()
+            cursor.execute('SELECT COUNT(*) FROM quotes')
+            print(f"✅ SQLite initialized with {cursor.fetchone()[0]} quotes")
+    
+    def load_quotes():
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
+            return [(row['quote'], row['author']) for row in cursor.fetchall()]
+    
+    def save_quote(quote, author):
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO quotes (quote, author, is_default) VALUES (?, ?, 0)",
+                (quote, author)
+            )
+            conn.commit()
+            return cursor.lastrowid
+    
+    def quote_exists(quote):
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as count FROM quotes WHERE LOWER(quote) = LOWER(?)", (quote,))
+            return cursor.fetchone()['count'] > 0
 
 # Initialize database on startup
 init_db()
 
-# ✅ Serve local images from ./images
+# ============================================================
+# ROUTES
+# ============================================================
+
 @app.route("/images/<path:filename>")
 def images(filename):
     images_dir = os.path.join(app.root_path, "images")
     return send_from_directory(images_dir, filename)
 
-# ✅ API endpoint to get all quotes
 @app.route("/api/quotes", methods=["GET"])
 def api_quotes():
-    """Return all quotes as JSON"""
     quotes = load_quotes()
     return jsonify({
         "ok": True,
@@ -143,10 +176,8 @@ def api_quotes():
         "quotes": [{"quote": q, "author": a} for q, a in quotes]
     })
 
-# ✅ API endpoint to get random quote
 @app.route("/api/quote/random", methods=["GET"])
 def api_random_quote():
-    """Return a random quote"""
     quotes = load_quotes()
     if not quotes:
         return jsonify({"ok": False, "message": "No quotes available"}), 404
@@ -158,7 +189,6 @@ def api_random_quote():
         "author": author
     })
 
-# ✅ Normal add (redirect) - kept for compatibility
 @app.route("/add", methods=["POST"])
 def add():
     quote = (request.form.get("quote") or "").strip()
@@ -176,7 +206,6 @@ def add():
     except Exception as e:
         return redirect(f"/?msg=Error:%20{str(e)}")
 
-# ✅ Add via AJAX (no refresh)
 @app.route("/add-json", methods=["POST"])
 def add_json():
     quote = (request.form.get("quote") or "").strip()
@@ -218,7 +247,6 @@ def home():
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Motivation 💖</title>
 
-<!-- ✅ Apply saved theme BEFORE paint (prevents flash) -->
 <script>
   (function () {
     try {
@@ -239,22 +267,13 @@ def home():
     --ring: rgba(255,111,145,.35);
     --pink1:#ffb3c7; --pink2:#ffd6e8;
     --blue1:#b9f3ff; --blue2:#e0f7fa;
-
-    /* Night gradient accents */
-    --nightA:#0b1022;
-    --nightB:#1a1140;
-    --nightC:#022b3a;
-    --nightD:#0a1930;
+    --nightA:#0b1022; --nightB:#1a1140; --nightC:#022b3a;
     --stars: rgba(255,255,255,.12);
   }
 
-  /* 🌙 Night gradient + stars (dark mode) */
   [data-theme="dark"]{
-    --bg1: var(--nightA);
-    --bg2: var(--nightB);
-    --card:#0b1222;
-    --text:#f8fafc;
-    --muted:#cbd5f5;
+    --bg1: var(--nightA); --bg2: var(--nightB);
+    --card:#0b1222; --text:#f8fafc; --muted:#cbd5f5;
     --shadow: rgba(0,0,0,.62);
     --glass: rgba(11,18,34,.78);
     --glassBorder: rgba(255,255,255,.10);
@@ -263,34 +282,21 @@ def home():
 
   *{box-sizing:border-box}
 
-  /* ✅ Smooth theme transitions */
   html, body, .card, .nav, .quoteCard, .mascot, textarea, input, .btn, .footer, .msg, .toggle {
-    transition:
-      background-color .35s ease,
-      color .35s ease,
-      border-color .35s ease,
-      box-shadow .35s ease,
-      filter .35s ease,
-      transform .20s ease;
+    transition: background-color .35s ease, color .35s ease, border-color .35s ease,
+                box-shadow .35s ease, filter .35s ease, transform .20s ease;
   }
 
   body{
     margin:0; min-height:100vh; display:flex; justify-content:center; align-items:center;
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    color: var(--text);
-    padding: 18px;
-    overflow:hidden;
-  }
-
-  /* Background (light) */
-  body{
+    color: var(--text); padding: 18px; overflow:hidden;
     background:
       radial-gradient(1200px 800px at 20% 20%, var(--bg1), transparent 60%),
       radial-gradient(1200px 800px at 80% 80%, var(--bg2), transparent 60%),
       linear-gradient(135deg,var(--bg1),var(--bg2));
   }
 
-  /* 🌙 Background (dark) night gradient + star speckles */
   [data-theme="dark"] body{
     background:
       radial-gradient(900px 600px at 20% 15%, rgba(120, 90, 255, .25), transparent 60%),
@@ -299,10 +305,8 @@ def home():
       linear-gradient(135deg, var(--nightA), var(--nightB) 45%, var(--nightC));
   }
 
-  /* fake stars layer */
   .stars{
-    position:fixed; inset:0;
-    pointer-events:none;
+    position:fixed; inset:0; pointer-events:none;
     background:
       radial-gradient(circle at 12% 20%, var(--stars) 0 1px, transparent 2px),
       radial-gradient(circle at 25% 70%, var(--stars) 0 1px, transparent 2px),
@@ -312,8 +316,7 @@ def home():
       radial-gradient(circle at 88% 28%, var(--stars) 0 1px, transparent 2px),
       radial-gradient(circle at 10% 88%, var(--stars) 0 1px, transparent 2px),
       radial-gradient(circle at 92% 86%, var(--stars) 0 1px, transparent 2px);
-    opacity: 0;
-    transition: opacity .35s ease;
+    opacity: 0; transition: opacity .35s ease;
   }
   [data-theme="dark"] .stars{ opacity: 1; }
 
@@ -350,8 +353,7 @@ def home():
   .toggle{
     display:inline-flex; align-items:center; gap:10px; padding:9px 10px;
     border-radius:14px; background: color-mix(in srgb, var(--glass) 85%, transparent);
-    border: 1px solid var(--glassBorder); cursor:pointer; user-select:none;
-    outline:none;
+    border: 1px solid var(--glassBorder); cursor:pointer; user-select:none; outline:none;
   }
   .toggle:hover{ transform: translateY(-1px); }
   .toggle:active{ transform: scale(.98); }
@@ -374,10 +376,7 @@ def home():
     background: var(--glass); border:1px solid var(--glassBorder);
     box-shadow: 0 16px 28px var(--shadow);
   }
-  .quote{
-    font-size: clamp(18px, 2.6vw, 24px);
-    font-weight:900; line-height:1.35;
-  }
+  .quote{ font-size: clamp(18px, 2.6vw, 24px); font-weight:900; line-height:1.35; }
   .author{ margin-top:10px; font-weight:850; color: var(--muted); }
 
   .btnRow{ display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
@@ -408,32 +407,19 @@ def home():
     box-shadow: 0 18px 30px var(--shadow); }
   .tip{ font-weight:900; color: var(--muted); text-align:center; }
 
-  .form{
-    width: 100%;
-    display: grid;
-    gap: 10px;
-    margin-top: 8px;
-  }
+  .form{ width: 100%; display: grid; gap: 10px; margin-top: 8px; }
   textarea, input{
-    width:100%;
-    padding:12px 12px;
-    border-radius:16px;
+    width:100%; padding:12px 12px; border-radius:16px;
     border:1px solid color-mix(in srgb, var(--text) 18%, transparent);
     background: color-mix(in srgb, var(--card) 82%, transparent);
-    color: var(--text);
-    font: inherit;
-    outline:none;
+    color: var(--text); font: inherit; outline:none;
   }
   textarea{ min-height: 90px; resize: vertical; }
 
   .msg{
-    margin-bottom: 14px;
-    padding: 10px 12px;
-    border-radius: 16px;
-    background: var(--glass);
-    border: 1px solid var(--glassBorder);
-    font-weight: 900;
-    color: var(--text);
+    margin-bottom: 14px; padding: 10px 12px; border-radius: 16px;
+    background: var(--glass); border: 1px solid var(--glassBorder);
+    font-weight: 900; color: var(--text);
   }
 
   .footer{
@@ -444,11 +430,8 @@ def home():
     padding: 3px 8px; border-radius:10px; font-family: ui-monospace, Menlo, Consolas, monospace; }
   
   .badge{
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 900;
+    display: inline-block; padding: 4px 10px; border-radius: 12px;
+    font-size: 11px; font-weight: 900;
     background: linear-gradient(135deg, var(--pink1), var(--pink2));
     color: var(--text);
   }
@@ -499,7 +482,6 @@ def home():
         <img src="/images/meow.jpg" alt="Cute cat"/>
         <div class="tip">🐱 Add your own quote below ✨</div>
 
-        <!-- ✅ Add quote form (no refresh) -->
         <form class="form" id="addForm" method="POST" action="/add-json">
           <textarea id="quoteInput" name="quote" placeholder="Write a new motivational quote..." required></textarea>
           <input id="authorInput" name="author" placeholder="Author (optional)"/>
@@ -507,12 +489,9 @@ def home():
         </form>
       </div>
     </div>
-    <div class="footer">
-        <div> Made with by haha 🥰 </div>
   </div>
 
 <script>
-  // Dark mode (smooth + clean)
   const root = document.documentElement;
   const toggle = document.getElementById("themeToggle");
   const icon = document.getElementById("themeIcon");
@@ -521,7 +500,6 @@ def home():
     const isDark = theme === "dark";
     if (isDark) root.setAttribute("data-theme", "dark");
     else root.removeAttribute("data-theme");
-
     icon.textContent = isDark ? "🌙" : "☀️";
     try { localStorage.setItem("theme", isDark ? "dark" : "light"); } catch (e) {}
     toggle.setAttribute("aria-pressed", String(isDark));
@@ -544,15 +522,9 @@ def home():
     }
   });
 
-  // Quotes (client side) — loaded from API
   let QUOTES = __QUOTES_JSON__;
-
   const quoteText = document.getElementById("quoteText");
   const quoteAuthor = document.getElementById("quoteAuthor");
-  const quoteCount = document.getElementById("quoteCount");
-
-  // Update quote count
-  quoteCount.textContent = `${QUOTES.length}`;
 
   document.getElementById("btnNew").addEventListener("click", () => {
     const [q, a] = QUOTES[Math.floor(Math.random() * QUOTES.length)];
@@ -570,14 +542,12 @@ def home():
     }
   });
 
-  // Add quote without refresh (AJAX)
   const addForm = document.getElementById("addForm");
   const quoteInput = document.getElementById("quoteInput");
   const authorInput = document.getElementById("authorInput");
 
   addForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-
     const formData = new FormData(addForm);
 
     try {
@@ -589,15 +559,13 @@ def home():
         return;
       }
 
-      // Add to local list + show immediately
       QUOTES.push([data.quote, data.author]);
       quoteText.textContent = `"${data.quote}"`;
       quoteAuthor.textContent = `— ${data.author}`;
-      quoteCount.textContent = `${QUOTES.length}`;
+      document.getElementById("quoteCount").textContent = `${QUOTES.length}`;
 
       quoteInput.value = "";
       authorInput.value = "";
-
       alert(data.message || "Saved! 🌸");
     } catch (err) {
       alert("Network error 😿");
@@ -610,9 +578,11 @@ def home():
 
     msg_block = f'<div class="msg">✨ {msg}</div>' if msg else ""
     html = html.replace("__MSG_BLOCK__", msg_block)
-
-    # Fill placeholders
     html = html.replace("__QUOTE__", quote).replace("__AUTHOR__", author)
+    html = html.replace("__COUNT__", str(len(quotes)))
+    
+    db_type = "PG" if POSTGRES_URL else "SQLite"
+    html = html.replace("__DB_TYPE__", db_type)
 
     quotes_json = json.dumps(quotes, ensure_ascii=False)
     html = html.replace("__QUOTES_JSON__", quotes_json)
