@@ -2,13 +2,28 @@ from flask import Flask, request, redirect, send_from_directory, jsonify
 import random
 import json
 import os
-from datetime import datetime
 
 app = Flask(__name__)
 
-# Environment detection
-IS_SERVERLESS = os.environ.get('VERCEL') == '1'
-POSTGRES_URL = os.environ.get('POSTGRES_URL')
+# ============================================================
+# ENV + PATHS
+# ============================================================
+
+IS_SERVERLESS = os.environ.get("VERCEL") == "1"
+POSTGRES_URL = os.environ.get("POSTGRES_URL")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# If you have: project/images/...
+LOCAL_IMAGES_DIR = os.path.join(BASE_DIR, "images")
+
+# If you deploy to Vercel and use: project/public/images/...
+PUBLIC_IMAGES_DIR = os.path.join(BASE_DIR, "public", "images")
+
+# Choose images directory automatically:
+# - If /public/images exists -> use it (Vercel-friendly)
+# - else -> use /images (your local structure)
+IMAGES_DIR = PUBLIC_IMAGES_DIR if os.path.isdir(PUBLIC_IMAGES_DIR) else LOCAL_IMAGES_DIR
 
 DEFAULT_QUOTES = [
     ("Believe you can and you're halfway there.", "Theodore Roosevelt"),
@@ -24,16 +39,15 @@ DEFAULT_QUOTES = [
 ]
 
 # ============================================================
-# DATABASE SETUP - Works both locally and on Vercel
+# DATABASE SETUP
 # ============================================================
 
 if POSTGRES_URL:
-    # Use Vercel Postgres (production)
+    # Use Postgres (e.g., Vercel Postgres)
     try:
         import psycopg2
-        from psycopg2.extras import RealDictCursor
         from contextlib import contextmanager
-        
+
         @contextmanager
         def get_db():
             conn = psycopg2.connect(POSTGRES_URL)
@@ -41,7 +55,7 @@ if POSTGRES_URL:
                 yield conn
             finally:
                 conn.close()
-        
+
         def init_db():
             try:
                 with get_db() as conn:
@@ -55,23 +69,20 @@ if POSTGRES_URL:
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                     """)
-                    
                     cursor.execute("SELECT COUNT(*) FROM quotes")
                     count = cursor.fetchone()[0]
-                    
+
                     if count == 0:
                         for quote, author in DEFAULT_QUOTES:
                             cursor.execute(
-                                "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, TRUE) ON CONFLICT (quote) DO NOTHING",
-                                (quote, author)
+                                "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, TRUE) "
+                                "ON CONFLICT (quote) DO NOTHING",
+                                (quote, author),
                             )
-                    
                     conn.commit()
-                    cursor.execute("SELECT COUNT(*) FROM quotes")
-                    print(f"✅ Postgres initialized with {cursor.fetchone()[0]} quotes")
             except Exception as e:
                 print(f"⚠️ DB init error: {e}")
-        
+
         def load_quotes():
             try:
                 with get_db() as conn:
@@ -81,40 +92,38 @@ if POSTGRES_URL:
             except Exception as e:
                 print(f"⚠️ Load error: {e}")
                 return list(DEFAULT_QUOTES)
-        
+
         def save_quote(quote, author):
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, FALSE) RETURNING id",
-                    (quote, author)
+                    (quote, author),
                 )
+                quote_id = cursor.fetchone()[0]
                 conn.commit()
-                return cursor.fetchone()[0]
-        
+                return quote_id
+
         def quote_exists(quote):
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM quotes WHERE LOWER(quote) = LOWER(%s)", (quote,))
                 return cursor.fetchone()[0] > 0
-        
+
         HAS_DATABASE = True
-        
+
     except ImportError:
         print("⚠️ psycopg2 not installed - using in-memory fallback")
         HAS_DATABASE = False
 
 else:
-    # Use SQLite (local development)
+    # Use SQLite (local) or /tmp (serverless) as fallback
     try:
         import sqlite3
         from contextlib import contextmanager
-        
-        if IS_SERVERLESS:
-            DB_FILE = "/tmp/quotes.db"
-        else:
-            DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quotes.db")
-        
+
+        DB_FILE = "/tmp/quotes.db" if IS_SERVERLESS else os.path.join(BASE_DIR, "quotes.db")
+
         @contextmanager
         def get_db():
             conn = sqlite3.connect(DB_FILE)
@@ -123,7 +132,7 @@ else:
                 yield conn
             finally:
                 conn.close()
-        
+
         def init_db():
             try:
                 with get_db() as conn:
@@ -137,77 +146,72 @@ else:
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                     """)
-                    
                     cursor.execute("SELECT COUNT(*) as count FROM quotes")
-                    count = cursor.fetchone()['count']
-                    
+                    count = cursor.fetchone()["count"]
+
                     if count == 0:
                         for quote, author in DEFAULT_QUOTES:
                             cursor.execute(
                                 "INSERT OR IGNORE INTO quotes (quote, author, is_default) VALUES (?, ?, 1)",
-                                (quote, author)
+                                (quote, author),
                             )
-                    
                     conn.commit()
-                    cursor.execute('SELECT COUNT(*) FROM quotes')
-                    env = "ephemeral /tmp" if IS_SERVERLESS else "local persistent"
-                    print(f"✅ SQLite initialized ({env}) with {cursor.fetchone()[0]} quotes")
             except Exception as e:
                 print(f"⚠️ DB init error: {e}")
-        
+
         def load_quotes():
             try:
                 with get_db() as conn:
                     cursor = conn.cursor()
                     cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
-                    return [(row['quote'], row['author']) for row in cursor.fetchall()]
+                    return [(row["quote"], row["author"]) for row in cursor.fetchall()]
             except Exception as e:
                 print(f"⚠️ Load error: {e}")
                 return list(DEFAULT_QUOTES)
-        
+
         def save_quote(quote, author):
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "INSERT INTO quotes (quote, author, is_default) VALUES (?, ?, 0)",
-                    (quote, author)
+                    (quote, author),
                 )
                 conn.commit()
                 return cursor.lastrowid
-        
+
         def quote_exists(quote):
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) as count FROM quotes WHERE LOWER(quote) = LOWER(?)", (quote,))
-                return cursor.fetchone()['count'] > 0
-        
+                return cursor.fetchone()["count"] > 0
+
         HAS_DATABASE = True
-        
+
     except Exception as e:
         print(f"⚠️ SQLite error: {e}")
         HAS_DATABASE = False
 
-# Fallback to in-memory if no database available
-if not HAS_DATABASE or ('HAS_DATABASE' not in dir() and not POSTGRES_URL):
-    print("⚠️ Using in-memory fallback (data will not persist)")
-    
-    # In-memory storage
+
+# In-memory fallback (if everything fails)
+if not HAS_DATABASE:
+    print("⚠️ Using in-memory storage")
+
     QUOTES_STORE = list(DEFAULT_QUOTES)
-    
+
     def init_db():
-        print("✅ In-memory storage initialized")
-    
+        pass
+
     def load_quotes():
         return QUOTES_STORE
-    
+
     def save_quote(quote, author):
         QUOTES_STORE.append((quote, author))
         return len(QUOTES_STORE)
-    
+
     def quote_exists(quote):
         return any(q.lower() == quote.lower() for q, _ in QUOTES_STORE)
 
-# Initialize database on startup
+
 try:
     init_db()
 except Exception as e:
@@ -219,11 +223,12 @@ except Exception as e:
 
 @app.route("/images/<path:filename>")
 def images(filename):
+    # Serves from ./images or ./public/images (auto-detected)
     try:
-        images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
-        return send_from_directory(images_dir, filename)
-    except Exception as e:
-        return f"Image not found: {e}", 404
+        return send_from_directory(IMAGES_DIR, filename)
+    except Exception:
+        return "Image not found", 404
+
 
 @app.route("/api/quotes", methods=["GET"])
 def api_quotes():
@@ -232,10 +237,11 @@ def api_quotes():
         return jsonify({
             "ok": True,
             "count": len(quotes),
-            "quotes": [{"quote": q, "author": a} for q, a in quotes]
+            "quotes": [{"quote": q, "author": a} for q, a in quotes],
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 @app.route("/api/quote/random", methods=["GET"])
 def api_random_quote():
@@ -243,15 +249,12 @@ def api_random_quote():
         quotes = load_quotes()
         if not quotes:
             return jsonify({"ok": False, "message": "No quotes available"}), 404
-        
+
         quote, author = random.choice(quotes)
-        return jsonify({
-            "ok": True,
-            "quote": quote,
-            "author": author
-        })
+        return jsonify({"ok": True, "quote": quote, "author": author})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
 
 @app.route("/add", methods=["POST"])
 def add():
@@ -267,8 +270,9 @@ def add():
 
         save_quote(quote, author)
         return redirect("/?msg=Saved%20%F0%9F%8C%B8")
-    except Exception as e:
-        return redirect(f"/?msg=Error:%20{str(e)[:50]}")
+    except Exception:
+        return redirect("/?msg=Error")
+
 
 @app.route("/add-json", methods=["POST"])
 def add_json():
@@ -288,10 +292,11 @@ def add_json():
             "id": quote_id,
             "quote": quote,
             "author": author,
-            "message": "Saved! 🌸"
+            "message": "Saved! 🌸",
         })
     except Exception as e:
         return jsonify({"ok": False, "message": f"Error: {str(e)}"}), 500
+
 
 @app.route("/")
 def home():
@@ -301,8 +306,12 @@ def home():
             quote, author = "Stay positive! ✨", "Unknown"
         else:
             quote, author = random.choice(quotes)
-        
+
         msg = (request.args.get("msg") or "").strip()
+
+        # Example mascot image (optional):
+        # Put file: images/meow.jpg  OR  public/images/meow.jpg
+        mascot_img_tag = '<img src="/images/meow.jpg" alt="cat"/>' if os.path.isfile(os.path.join(IMAGES_DIR, "meow.jpg")) else '<div style="font-size:80px"></div>'
 
         html = r"""
 <!DOCTYPE html>
@@ -311,335 +320,160 @@ def home():
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Motivation 💖</title>
-
 <script>
-  (function () {
-    try {
-      const theme = localStorage.getItem("theme");
-      if (theme === "dark") document.documentElement.setAttribute("data-theme", "dark");
-    } catch (e) {}
-  })();
+(function(){
+  try{
+    const t=localStorage.getItem("theme");
+    if(t==="dark") document.documentElement.setAttribute("data-theme","dark");
+  }catch(e){}
+})();
 </script>
-
 <style>
-  :root{
-    --bg1:#ffd6e8; --bg2:#e0f7fa;
-    --card:#ffffff;
-    --text:#2b2b2b; --muted:#5a5a5a;
-    --shadow: rgba(0,0,0,.18);
-    --glass: rgba(255,255,255,.72);
-    --glassBorder: rgba(255,255,255,.45);
-    --ring: rgba(255,111,145,.35);
-    --pink1:#ffb3c7; --pink2:#ffd6e8;
-    --blue1:#b9f3ff; --blue2:#e0f7fa;
-    --nightA:#0b1022; --nightB:#1a1140; --nightC:#022b3a;
-    --stars: rgba(255,255,255,.12);
-  }
-
-  [data-theme="dark"]{
-    --bg1: var(--nightA); --bg2: var(--nightB);
-    --card:#0b1222; --text:#f8fafc; --muted:#cbd5f5;
-    --shadow: rgba(0,0,0,.62);
-    --glass: rgba(11,18,34,.78);
-    --glassBorder: rgba(255,255,255,.10);
-    --ring: rgba(85,214,255,.28);
-  }
-
-  *{box-sizing:border-box}
-
-  html, body, .card, .nav, .quoteCard, .mascot, textarea, input, .btn, .footer, .msg, .toggle {
-    transition: background-color .35s ease, color .35s ease, border-color .35s ease,
-                box-shadow .35s ease, filter .35s ease, transform .20s ease;
-  }
-
-  body{
-    margin:0; min-height:100vh; display:flex; justify-content:center; align-items:center;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    color: var(--text); padding: 18px; overflow:hidden;
-    background:
-      radial-gradient(1200px 800px at 20% 20%, var(--bg1), transparent 60%),
-      radial-gradient(1200px 800px at 80% 80%, var(--bg2), transparent 60%),
-      linear-gradient(135deg,var(--bg1),var(--bg2));
-  }
-
-  [data-theme="dark"] body{
-    background:
-      radial-gradient(900px 600px at 20% 15%, rgba(120, 90, 255, .25), transparent 60%),
-      radial-gradient(900px 600px at 80% 85%, rgba(0, 200, 255, .15), transparent 60%),
-      radial-gradient(1200px 800px at 50% 50%, rgba(255,255,255,.06), transparent 65%),
-      linear-gradient(135deg, var(--nightA), var(--nightB) 45%, var(--nightC));
-  }
-
-  .stars{
-    position:fixed; inset:0; pointer-events:none;
-    background:
-      radial-gradient(circle at 12% 20%, var(--stars) 0 1px, transparent 2px),
-      radial-gradient(circle at 25% 70%, var(--stars) 0 1px, transparent 2px),
-      radial-gradient(circle at 44% 35%, var(--stars) 0 1px, transparent 2px),
-      radial-gradient(circle at 58% 18%, var(--stars) 0 1px, transparent 2px),
-      radial-gradient(circle at 77% 58%, var(--stars) 0 1px, transparent 2px),
-      radial-gradient(circle at 88% 28%, var(--stars) 0 1px, transparent 2px),
-      radial-gradient(circle at 10% 88%, var(--stars) 0 1px, transparent 2px),
-      radial-gradient(circle at 92% 86%, var(--stars) 0 1px, transparent 2px);
-    opacity: 0; transition: opacity .35s ease;
-  }
-  [data-theme="dark"] .stars{ opacity: 1; }
-
-  .petal{ position:absolute; top:-12%; font-size:22px; opacity:.88;
-    animation: fall linear infinite; user-select:none; pointer-events:none; }
-  @keyframes fall{ 0%{transform:translateY(-10vh) rotate(0deg)}
-    100%{transform:translateY(110vh) rotate(360deg)} }
-
-  .card{
-    width:min(940px, 96%);
-    background: color-mix(in srgb, var(--card) 92%, transparent);
-    backdrop-filter: blur(10px);
-    border-radius:24px; padding:22px 18px 18px;
-    border: 1px solid color-mix(in srgb, var(--card) 70%, transparent);
-    box-shadow:0 20px 50px var(--shadow);
-    animation: enter .75s ease;
-  }
-  @keyframes enter{ 0%{transform:translateY(10px) scale(.98);opacity:0}
-    100%{transform:translateY(0) scale(1);opacity:1} }
-
-  .nav{
-    display:flex; align-items:center; justify-content:space-between; gap:14px;
-    padding:10px 12px; border-radius:18px;
-    background: var(--glass); border:1px solid var(--glassBorder);
-    box-shadow: 0 10px 22px var(--shadow); margin-bottom:16px;
-    flex-wrap: wrap;
-  }
-  .brand{ display:flex; align-items:center; gap:10px; font-weight:950; }
-  .logo{ width:34px; height:34px; border-radius:12px; display:grid; place-items:center;
-    background: linear-gradient(135deg, var(--pink1), var(--blue1));
-    box-shadow:0 10px 18px var(--shadow); animation: wiggle 2.8s ease-in-out infinite; }
-  @keyframes wiggle{ 0%,100%{transform:rotate(-2deg)} 50%{transform:rotate(2deg)} }
-
-  .toggle{
-    display:inline-flex; align-items:center; gap:10px; padding:9px 10px;
-    border-radius:14px; background: color-mix(in srgb, var(--glass) 85%, transparent);
-    border: 1px solid var(--glassBorder); cursor:pointer; user-select:none; outline:none;
-  }
-  .toggle:hover{ transform: translateY(-1px); }
-  .toggle:active{ transform: scale(.98); }
-
-  .switch{ width:46px; height:26px; border-radius:999px; position:relative;
-    background: color-mix(in srgb, var(--text) 15%, transparent);
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text) 12%, transparent); }
-  .knob{ width:22px; height:22px; border-radius:999px; position:absolute; top:2px; left:2px;
-    background: var(--card); transition:left .18s ease; box-shadow:0 8px 16px var(--shadow); }
-  [data-theme="dark"] .knob{ left:22px; }
-
-  .hero{ display:grid; grid-template-columns: 1.15fr .85fr; gap:16px; align-items:stretch; }
-  @media (max-width: 760px){ .hero{ grid-template-columns: 1fr; } }
-
-  h1{ margin:10px 0 6px; font-size: clamp(26px, 4vw, 42px); letter-spacing:-0.02em; }
-  p{ margin:0 0 14px; color: var(--muted); line-height:1.5; }
-
-  .quoteCard{
-    padding:18px 16px; border-radius:20px;
-    background: var(--glass); border:1px solid var(--glassBorder);
-    box-shadow: 0 16px 28px var(--shadow);
-  }
-  .quote{ font-size: clamp(18px, 2.6vw, 24px); font-weight:900; line-height:1.35; }
-  .author{ margin-top:10px; font-weight:850; color: var(--muted); }
-
-  .btnRow{ display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
-  .btn{
-    border:0; padding:12px 14px; border-radius:16px; font-weight:950;
-    cursor:pointer; box-shadow: 0 10px 22px var(--shadow);
-    transition: transform .12s ease, box-shadow .12s ease; outline:none;
-    background: linear-gradient(135deg, var(--pink1), var(--pink2));
-  }
-  .btn:hover{ transform: translateY(-3px); }
-  .btn:active{ transform: scale(.98); }
-  .btn:focus{ box-shadow: 0 0 0 4px var(--ring), 0 10px 22px var(--shadow); }
-  .btn.secondary{ background: linear-gradient(135deg, var(--blue1), var(--blue2)); }
-
-  .mascot{
-    border-radius:22px;
-    background: linear-gradient(135deg,
-      color-mix(in srgb, var(--blue1) 55%, transparent),
-      color-mix(in srgb, var(--pink1) 55%, transparent)
-    );
-    border: 1px solid color-mix(in srgb, var(--card) 55%, transparent);
-    box-shadow: 0 16px 28px var(--shadow);
-    padding:14px;
-    display:flex; flex-direction:column; justify-content:center; align-items:center; gap:10px;
-    min-height:240px;
-  }
-  img{ width:min(320px, 100%); height:auto; border-radius:20px;
-    box-shadow: 0 18px 30px var(--shadow); }
-  .tip{ font-weight:900; color: var(--muted); text-align:center; }
-
-  .form{ width: 100%; display: grid; gap: 10px; margin-top: 8px; }
-  textarea, input{
-    width:100%; padding:12px 12px; border-radius:16px;
-    border:1px solid color-mix(in srgb, var(--text) 18%, transparent);
-    background: color-mix(in srgb, var(--card) 82%, transparent);
-    color: var(--text); font: inherit; outline:none;
-  }
-  textarea{ min-height: 90px; resize: vertical; }
-
-  .msg{
-    margin-bottom: 14px; padding: 10px 12px; border-radius: 16px;
-    background: var(--glass); border: 1px solid var(--glassBorder);
-    font-weight: 900; color: var(--text);
-  }
-
-  .footer{
-    margin-top:14px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px;
-    color: color-mix(in srgb, var(--muted) 85%, transparent); font-size:13px;
-  }
-  code{ background: color-mix(in srgb, var(--text) 10%, transparent);
-    padding: 3px 8px; border-radius:10px; font-family: ui-monospace, Menlo, Consolas, monospace; }
-  
-  .badge{
-    display: inline-block; padding: 4px 10px; border-radius: 12px;
-    font-size: 11px; font-weight: 900;
-    background: linear-gradient(135deg, var(--pink1), var(--pink2));
-    color: var(--text);
-  }
+:root{--bg1:#ffd6e8;--bg2:#e0f7fa;--card:#fff;--text:#2b2b2b;--muted:#5a5a5a;--shadow:rgba(0,0,0,.18);--glass:rgba(255,255,255,.72);--glassBorder:rgba(255,255,255,.45);--ring:rgba(255,111,145,.35);--pink1:#ffb3c7;--pink2:#ffd6e8;--blue1:#b9f3ff;--blue2:#e0f7fa;--nightA:#0b1022;--nightB:#1a1140;--nightC:#022b3a;--stars:rgba(255,255,255,.12)}
+[data-theme="dark"]{--bg1:var(--nightA);--bg2:var(--nightB);--card:#0b1222;--text:#f8fafc;--muted:#cbd5f5;--shadow:rgba(0,0,0,.62);--glass:rgba(11,18,34,.78);--glassBorder:rgba(255,255,255,.1);--ring:rgba(85,214,255,.28)}
+*{box-sizing:border-box}
+html,body,.card,.nav,.quoteCard,.mascot,textarea,input,.btn,.footer,.msg,.toggle{transition:background-color .35s ease,color .35s ease,border-color .35s ease,box-shadow .35s ease,filter .35s ease,transform .2s ease}
+body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);padding:clamp(12px,3vw,18px);overflow-x:hidden;overflow-y:auto;background:radial-gradient(1200px 800px at 20% 20%,var(--bg1),transparent 60%),radial-gradient(1200px 800px at 80% 80%,var(--bg2),transparent 60%),linear-gradient(135deg,var(--bg1),var(--bg2))}
+[data-theme="dark"] body{background:radial-gradient(900px 600px at 20% 15%,rgba(120,90,255,.25),transparent 60%),radial-gradient(900px 600px at 80% 85%,rgba(0,200,255,.15),transparent 60%),radial-gradient(1200px 800px at 50% 50%,rgba(255,255,255,.06),transparent 65%),linear-gradient(135deg,var(--nightA),var(--nightB) 45%,var(--nightC))}
+.stars{position:fixed;inset:0;pointer-events:none;background:
+radial-gradient(circle at 12% 20%,var(--stars) 0 1px,transparent 2px),
+radial-gradient(circle at 25% 70%,var(--stars) 0 1px,transparent 2px),
+radial-gradient(circle at 44% 35%,var(--stars) 0 1px,transparent 2px),
+radial-gradient(circle at 58% 18%,var(--stars) 0 1px,transparent 2px),
+radial-gradient(circle at 77% 58%,var(--stars) 0 1px,transparent 2px),
+radial-gradient(circle at 88% 28%,var(--stars) 0 1px,transparent 2px),
+radial-gradient(circle at 10% 88%,var(--stars) 0 1px,transparent 2px),
+radial-gradient(circle at 92% 86%,var(--stars) 0 1px,transparent 2px);
+opacity:0;transition:opacity .35s ease}
+[data-theme="dark"] .stars{opacity:1}
+.petal{position:absolute;top:-12%;font-size:clamp(16px,3vw,22px);opacity:.88;animation:fall linear infinite;user-select:none;pointer-events:none}
+@keyframes fall{0%{transform:translateY(-10vh) rotate(0deg)}100%{transform:translateY(110vh) rotate(360deg)}}
+.card{width:min(940px,100%);background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(10px);border-radius:clamp(16px,3vw,24px);padding:clamp(16px,3vw,22px) clamp(14px,2.5vw,18px) clamp(14px,2.5vw,18px);border:1px solid color-mix(in srgb,var(--card) 70%,transparent);box-shadow:0 20px 50px var(--shadow);animation:enter .75s ease;margin:clamp(12px,2vw,20px) 0}
+@keyframes enter{0%{transform:translateY(10px) scale(.98);opacity:0}100%{transform:translateY(0) scale(1);opacity:1}}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:clamp(10px,2vw,14px);padding:clamp(8px,1.5vw,10px) clamp(10px,2vw,12px);border-radius:clamp(14px,2.5vw,18px);background:var(--glass);border:1px solid var(--glassBorder);box-shadow:0 10px 22px var(--shadow);margin-bottom:clamp(12px,2vw,16px);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:clamp(8px,1.5vw,10px);font-weight:950;font-size:clamp(14px,2vw,16px);min-width:0}
+.logo{width:clamp(28px,5vw,34px);height:clamp(28px,5vw,34px);border-radius:clamp(10px,2vw,12px);display:grid;place-items:center;background:linear-gradient(135deg,var(--pink1),var(--blue1));box-shadow:0 10px 18px var(--shadow);animation:wiggle 2.8s ease-in-out infinite;font-size:clamp(16px,3vw,20px)}
+@keyframes wiggle{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
+.toggle{display:inline-flex;align-items:center;gap:clamp(8px,1.5vw,10px);padding:clamp(7px,1.5vw,9px) clamp(8px,1.5vw,10px);border-radius:clamp(12px,2vw,14px);background:color-mix(in srgb,var(--glass) 85%,transparent);border:1px solid var(--glassBorder);cursor:pointer;user-select:none;outline:none;font-size:clamp(14px,2vw,16px);margin-left:auto}
+@media(hover:hover){.toggle:hover{transform:translateY(-1px)}}
+.toggle:active{transform:scale(.98)}
+.switch{width:clamp(40px,8vw,46px);height:clamp(22px,4.5vw,26px);border-radius:999px;position:relative;background:color-mix(in srgb,var(--text) 15%,transparent);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--text) 12%,transparent)}
+.knob{width:clamp(18px,4vw,22px);height:clamp(18px,4vw,22px);border-radius:999px;position:absolute;top:2px;left:2px;background:var(--card);transition:left .18s ease;box-shadow:0 8px 16px var(--shadow)}
+[data-theme="dark"] .knob{left:calc(100% - clamp(18px,4vw,22px) - 2px)}
+.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:clamp(12px,2vw,16px);align-items:stretch;min-width:0}
+@media (max-width:760px){.hero{grid-template-columns:1fr}}
+h1{margin:clamp(8px,1.5vw,10px) 0 clamp(4px,1vw,6px);font-size:clamp(22px,5vw,42px);letter-spacing:-.02em;line-height:1.2}
+p{margin:0 0 clamp(10px,2vw,14px);color:var(--muted);line-height:1.5;font-size:clamp(14px,2vw,16px)}
+.quoteCard{padding:clamp(14px,2.5vw,18px) clamp(12px,2vw,16px);border-radius:clamp(16px,3vw,20px);background:var(--glass);border:1px solid var(--glassBorder);box-shadow:0 16px 28px var(--shadow);min-width:0}
+.quote{font-size:clamp(16px,3.5vw,24px);font-weight:900;line-height:1.35;overflow-wrap:anywhere;word-break:break-word;hyphens:auto}
+.author{margin-top:clamp(8px,1.5vw,10px);font-weight:850;color:var(--muted);font-size:clamp(13px,2vw,15px)}
+.btnRow{display:flex;flex-wrap:wrap;gap:clamp(8px,1.5vw,10px);margin-top:clamp(10px,2vw,12px)}
+.btn{border:0;padding:clamp(10px,2vw,12px) clamp(12px,2.5vw,14px);border-radius:clamp(12px,2.5vw,16px);font-weight:950;cursor:pointer;box-shadow:0 10px 22px var(--shadow);transition:transform .12s ease,box-shadow .12s ease;outline:none;background:linear-gradient(135deg,var(--pink1),var(--pink2));font-size:clamp(13px,2vw,15px);white-space:nowrap}
+@media(hover:hover){.btn:hover{transform:translateY(-3px)}}
+.btn:active{transform:scale(.98)}
+.btn:focus{box-shadow:0 0 0 4px var(--ring),0 10px 22px var(--shadow)}
+.btn.secondary{background:linear-gradient(135deg,var(--blue1),var(--blue2))}
+.mascot{border-radius:clamp(16px,3vw,22px);background:linear-gradient(135deg,color-mix(in srgb,var(--blue1) 55%,transparent),color-mix(in srgb,var(--pink1) 55%,transparent));border:1px solid color-mix(in srgb,var(--card) 55%,transparent);box-shadow:0 16px 28px var(--shadow);padding:clamp(12px,2.5vw,14px);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:clamp(8px,1.5vw,10px);min-height:clamp(200px,35vw,240px);width:100%;min-width:0}
+.mascot img{width:min(320px,100%);height:auto;border-radius:clamp(16px,3vw,20px);box-shadow:0 18px 30px var(--shadow)}
+.tip{font-weight:900;color:var(--muted);text-align:center;font-size:clamp(13px,2vw,15px)}
+.form{width:100%;display:grid;gap:clamp(8px,1.5vw,10px);margin-top:clamp(6px,1.5vw,8px)}
+textarea,input{width:100%;padding:clamp(10px,2vw,12px);border-radius:clamp(12px,2.5vw,16px);border:1px solid color-mix(in srgb,var(--text) 18%,transparent);background:color-mix(in srgb,var(--card) 82%,transparent);color:var(--text);font:inherit;outline:none;font-size:clamp(14px,2vw,16px)}
+textarea{min-height:clamp(70px,15vw,90px);resize:vertical}
+.msg{margin-bottom:clamp(10px,2vw,14px);padding:clamp(8px,1.5vw,10px) clamp(10px,2vw,12px);border-radius:clamp(12px,2.5vw,16px);background:var(--glass);border:1px solid var(--glassBorder);font-weight:900;color:var(--text);font-size:clamp(13px,2vw,15px)}
+.footer{margin-top:clamp(10px,2vw,14px);display:flex;flex-wrap:wrap;justify-content:space-between;gap:clamp(8px,1.5vw,10px);color:color-mix(in srgb,var(--muted) 85%,transparent);font-size:clamp(11px,1.8vw,13px);align-items:center}
+.badge{display:inline-block;padding:clamp(3px,0.7vw,4px) clamp(7px,1.5vw,10px);border-radius:clamp(10px,2vw,12px);font-size:clamp(9px,1.6vw,11px);font-weight:900;background:linear-gradient(135deg,var(--pink1),var(--pink2));color:var(--text)}
+@media (max-width:520px){.btnRow{flex-direction:column}.btn{width:100%;text-align:center}}
+@media (max-width:760px){.mascot{min-height:auto}}
+@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
 </style>
 </head>
-
 <body>
-  <div class="stars"></div>
+<div class="stars"></div>
+<span class="petal" style="left:12%;animation-duration:9s">🌸</span>
+<span class="petal" style="left:28%;animation-duration:12s">🌸</span>
+<span class="petal" style="left:46%;animation-duration:10s">🌸</span>
+<span class="petal" style="left:64%;animation-duration:13s">🌸</span>
+<span class="petal" style="left:82%;animation-duration:11s">🌸</span>
 
-  <span class="petal" style="left:12%;animation-duration:9s">🌸</span>
-  <span class="petal" style="left:28%;animation-duration:12s">🌸</span>
-  <span class="petal" style="left:46%;animation-duration:10s">🌸</span>
-  <span class="petal" style="left:64%;animation-duration:13s">🌸</span>
-  <span class="petal" style="left:82%;animation-duration:11s">🌸</span>
-
-  <div class="card">
-    <div class="nav">
-      <div class="brand">
-        <div class="logo">🎀</div>
-        <div>Motivation </div>
-      </div>
-
-      <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
-        <span id="themeIcon">☀️</span>
-        <div class="switch"><div class="knob"></div></div>
-      </div>
-    </div>
-
-    __MSG_BLOCK__
-
-    <div class="hero">
-      <div>
-        <h1>Today's Cute Motivation 💖</h1>
-        <p>One quote can change your mood. Take a deep breath… you got this ✨</p>
-
-        <div class="quoteCard">
-          <div class="quote" id="quoteText">"__QUOTE__"</div>
-          <div class="author" id="quoteAuthor">— __AUTHOR__</div>
-
-          <div class="btnRow">
-            <button class="btn" id="btnNew" type="button">✨ New quote</button>
-            <button class="btn secondary" id="btnCopy" type="button">📋 Copy</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="mascot">
-        <img src="/images/meow.jpg" alt="Cute cat" onerror="this.style.display='none'"/>
-        <div class="tip">🐱 Add your own quote below ✨</div>
-
-        <form class="form" id="addForm" method="POST" action="/add-json">
-          <textarea id="quoteInput" name="quote" placeholder="Write a new motivational quote..." required></textarea>
-          <input id="authorInput" name="author" placeholder="Author (optional)"/>
-          <button class="btn" type="submit">🌸 Save quote</button>
-        </form>
-      </div>
-    </div>
-    
-    <div class="footer">
-      <div>💌 <span id="quoteCount">__COUNT__</span> quotes stored</div>
+<div class="card">
+  <div class="nav">
+    <div class="brand"><div class="logo">🎀</div><div>Motivation <span class="badge">__DB_TYPE__</span></div></div>
+    <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
+      <span id="themeIcon">☀️</span><div class="switch"><div class="knob"></div></div>
     </div>
   </div>
 
+  __MSG_BLOCK__
+
+  <div class="hero">
+    <div>
+      <h1>Today's Cute Motivation 💖</h1>
+      <p>One quote can change your mood. Take a deep breath… you got this ✨</p>
+      <div class="quoteCard">
+        <div class="quote" id="quoteText">"__QUOTE__"</div>
+        <div class="author" id="quoteAuthor">— __AUTHOR__</div>
+        <div class="btnRow">
+          <button class="btn" id="btnNew" type="button">✨ New quote</button>
+          <button class="btn secondary" id="btnCopy" type="button">📋 Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mascot">
+      __MASCOT__
+      <div class="tip">Add your own quote below ✨</div>
+      <form class="form" id="addForm" method="POST" action="/add-json">
+        <textarea id="quoteInput" name="quote" placeholder="Write a new motivational quote..." required></textarea>
+        <input id="authorInput" name="author" placeholder="Author (optional)"/>
+        <button class="btn" type="submit">🌸 Save quote</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div>💌 <span id="quoteCount">__COUNT__</span> quotes</div>
+  </div>
+</div>
+
 <script>
-  const root = document.documentElement;
-  const toggle = document.getElementById("themeToggle");
-  const icon = document.getElementById("themeIcon");
-
-  function applyTheme(theme) {
-    const isDark = theme === "dark";
-    if (isDark) root.setAttribute("data-theme", "dark");
-    else root.removeAttribute("data-theme");
-    icon.textContent = isDark ? "🌙" : "☀️";
-    try { localStorage.setItem("theme", isDark ? "dark" : "light"); } catch (e) {}
-    toggle.setAttribute("aria-pressed", String(isDark));
-  }
-
-  const saved = (() => {
-    try { return localStorage.getItem("theme"); } catch(e) { return null; }
-  })();
-  applyTheme(saved === "dark" ? "dark" : "light");
-
-  toggle.addEventListener("click", () => {
-    const isDarkNow = root.getAttribute("data-theme") === "dark";
-    applyTheme(isDarkNow ? "light" : "dark");
-  });
-
-  toggle.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      toggle.click();
-    }
-  });
-
-  let QUOTES = __QUOTES_JSON__;
-  const quoteText = document.getElementById("quoteText");
-  const quoteAuthor = document.getElementById("quoteAuthor");
-
-  document.getElementById("btnNew").addEventListener("click", () => {
-    const [q, a] = QUOTES[Math.floor(Math.random() * QUOTES.length)];
-    quoteText.textContent = `"${q}"`;
-    quoteAuthor.textContent = `— ${a}`;
-  });
-
-  document.getElementById("btnCopy").addEventListener("click", async () => {
-    const text = `${quoteText.textContent} ${quoteAuthor.textContent}`;
-    try{
-      await navigator.clipboard.writeText(text);
-      alert("Copied! 💖");
-    }catch(e){
-      alert("Copy failed 😿 (browser permission)");
-    }
-  });
-
-  const addForm = document.getElementById("addForm");
-  const quoteInput = document.getElementById("quoteInput");
-  const authorInput = document.getElementById("authorInput");
-
-  addForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const formData = new FormData(addForm);
-
-    try {
-      const res = await fetch("/add-json", { method: "POST", body: formData });
-      const data = await res.json();
-
-      if (!res.ok || !data.ok) {
-        alert(data.message || "Failed 😿");
-        return;
-      }
-
-      QUOTES.push([data.quote, data.author]);
-      quoteText.textContent = `"${data.quote}"`;
-      quoteAuthor.textContent = `— ${data.author}`;
-      document.getElementById("quoteCount").textContent = `${QUOTES.length}`;
-
-      quoteInput.value = "";
-      authorInput.value = "";
-      alert(data.message || "Saved! 🌸");
-    } catch (err) {
-      alert("Network error 😿");
-    }
-  });
+const root=document.documentElement,toggle=document.getElementById("themeToggle"),icon=document.getElementById("themeIcon");
+function applyTheme(t){
+  const e=t==="dark";
+  e?root.setAttribute("data-theme","dark"):root.removeAttribute("data-theme");
+  icon.textContent=e?"🌙":"☀️";
+  try{localStorage.setItem("theme",e?"dark":"light")}catch(_){}
+  toggle.setAttribute("aria-pressed",String(e));
+}
+const saved=(()=>{try{return localStorage.getItem("theme")}catch(e){return null}})();
+applyTheme(saved==="dark"?"dark":"light");
+toggle.addEventListener("click",()=>{const t=root.getAttribute("data-theme")==="dark";applyTheme(t?"light":"dark")});
+toggle.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle.click()}});
+let QUOTES=__QUOTES_JSON__;
+const quoteText=document.getElementById("quoteText"),quoteAuthor=document.getElementById("quoteAuthor");
+document.getElementById("btnNew").addEventListener("click",()=>{
+  const [t,a]=QUOTES[Math.floor(Math.random()*QUOTES.length)];
+  quoteText.textContent=`"${t}"`;quoteAuthor.textContent=`— ${a}`;
+});
+document.getElementById("btnCopy").addEventListener("click",async()=>{
+  const t=`${quoteText.textContent} ${quoteAuthor.textContent}`;
+  try{await navigator.clipboard.writeText(t);alert("Copied! 💖")}catch(e){alert("Copy failed 😿")}
+});
+const addForm=document.getElementById("addForm"),quoteInput=document.getElementById("quoteInput"),authorInput=document.getElementById("authorInput");
+addForm.addEventListener("submit",async e=>{
+  e.preventDefault();
+  const fd=new FormData(addForm);
+  try{
+    const r=await fetch("/add-json",{method:"POST",body:fd});
+    const o=await r.json();
+    if(!r.ok||!o.ok){alert(o.message||"Failed 😿");return}
+    QUOTES.push([o.quote,o.author]);
+    quoteText.textContent=`"${o.quote}"`;
+    quoteAuthor.textContent=`— ${o.author}`;
+    document.getElementById("quoteCount").textContent=`${QUOTES.length}`;
+    quoteInput.value="";authorInput.value="";
+    alert(o.message||"Saved! 🌸");
+  }catch(err){alert("Network error 😿")}
+});
 </script>
 </body>
 </html>
@@ -649,33 +483,31 @@ def home():
         html = html.replace("__MSG_BLOCK__", msg_block)
         html = html.replace("__QUOTE__", quote).replace("__AUTHOR__", author)
         html = html.replace("__COUNT__", str(len(quotes)))
-        
+
         if POSTGRES_URL:
             db_type = "PG"
         elif IS_SERVERLESS:
-            db_type = "/tmp"
+            db_type = "tmp"
         else:
-            db_type = "SQLite"
+            db_type = ""
         html = html.replace("__DB_TYPE__", db_type)
+
+        html = html.replace("__MASCOT__", mascot_img_tag)
 
         quotes_json = json.dumps(quotes, ensure_ascii=False)
         html = html.replace("__QUOTES_JSON__", quotes_json)
 
         return html
-    
-    except Exception as e:
-        return f"""
-        <html>
-        <body style="font-family: system-ui; padding: 40px; max-width: 600px; margin: 0 auto;">
-        <h1>🚨 Application Error</h1>
-        <p><strong>Error:</strong> {str(e)}</p>
-        <p>Check Vercel logs for details</p>
-        </body>
-        </html>
-        """, 500
 
-# For Vercel serverless
-app = app
+    except Exception as e:
+        return f"Error: {str(e)}", 500
+
+
+# Vercel serverless handler (optional)
+def handler(request, context=None):
+    with app.request_context(request.environ):
+        return app.full_dispatch_request()
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

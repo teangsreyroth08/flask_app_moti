@@ -13,4 +13,3 @@ COPY . .
 
 # App start command (overrideable in CI)
 CMD ["python", "app.py"]
-
