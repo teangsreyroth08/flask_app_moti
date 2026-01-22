@@ -334,7 +334,7 @@ def home():
         mascot_img_tag = (
             '<img src="/images/meow.jpg" alt="cat"/>'
             if os.path.isfile(mascot_path)
-            else '<div style="font-size:clamp(60px,12vw,80px)">🐱</div>'
+            else '<div style="font-size:clamp(60px,12vw,80px)"></div>'
         )
 
         html = r"""
