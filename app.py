@@ -1,63 +1,164 @@
-from flask import Flask, request, redirect, send_from_directory
+from flask import Flask, request, redirect, send_from_directory, jsonify
+import sqlite3
 import random
 import json
 import os
+from datetime import datetime
+from contextlib import contextmanager
 
 app = Flask(__name__)
 
-# Persist user-added quotes
-QUOTES_FILE = os.path.join(app.root_path, "quotes.json")
+# Database setup
+DB_FILE = os.path.join(app.root_path, "quotes.db")
+QUOTES_JSON_FILE = os.path.join(app.root_path, "quotes.json")
 
 DEFAULT_QUOTES = [
     ("Believe you can and you're halfway there.", "Theodore Roosevelt"),
     ("Small steps every day become big results.", "Unknown"),
     ("Discipline beats motivation when motivation is low.", "Unknown"),
     ("Your future is created by what you do today, not tomorrow.", "Robert Kiyosaki"),
-    ("Don’t watch the clock; do what it does. Keep going.", "Sam Levenson"),
-    ("You don’t have to be perfect to be proud.", "Unknown"),
+    ("Don't watch the clock; do what it does. Keep going.", "Sam Levenson"),
+    ("You don't have to be perfect to be proud.", "Unknown"),
     ("Progress, not perfection.", "Unknown"),
-    ("It always seems impossible until it’s done.", "Nelson Mandela"),
+    ("It always seems impossible until it's done.", "Nelson Mandela"),
     ("Start where you are. Use what you have. Do what you can.", "Arthur Ashe"),
     ("Dream big. Start small. Act now.", "Robin Sharma"),
 ]
 
+@contextmanager
+def get_db():
+    """Context manager for database connections"""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+def init_db():
+    """Initialize database with schema and migrate from JSON if needed"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Create quotes table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS quotes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quote TEXT NOT NULL UNIQUE,
+                author TEXT NOT NULL DEFAULT 'Unknown',
+                is_default BOOLEAN NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Check if we need to migrate
+        cursor.execute("SELECT COUNT(*) as count FROM quotes")
+        count = cursor.fetchone()['count']
+        
+        if count == 0:
+            # First run - insert defaults
+            for quote, author in DEFAULT_QUOTES:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO quotes (quote, author, is_default) VALUES (?, ?, 1)",
+                    (quote, author)
+                )
+            
+            # Migrate from old JSON file if exists
+            if os.path.exists(QUOTES_JSON_FILE):
+                try:
+                    with open(QUOTES_JSON_FILE, "r", encoding="utf-8") as f:
+                        old_quotes = json.load(f)
+                    
+                    if isinstance(old_quotes, list):
+                        migrated = 0
+                        for item in old_quotes:
+                            q = (item.get("quote") or "").strip()
+                            a = (item.get("author") or "Unknown").strip() or "Unknown"
+                            if q:
+                                try:
+                                    cursor.execute(
+                                        "INSERT INTO quotes (quote, author, is_default) VALUES (?, ?, 0)",
+                                        (q, a)
+                                    )
+                                    migrated += 1
+                                except sqlite3.IntegrityError:
+                                    pass  # Skip duplicates
+                        
+                        if migrated > 0:
+                            print(f"✨ Migrated {migrated} quotes from JSON to database")
+                    
+                    # Backup and remove old file
+                    backup_name = f"quotes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    os.rename(QUOTES_JSON_FILE, os.path.join(app.root_path, backup_name))
+                    print(f"📦 Old JSON backed up as {backup_name}")
+                
+                except Exception as e:
+                    print(f"⚠️ Migration warning: {e}")
+        
+        conn.commit()
+        print(f"✅ Database initialized with {cursor.execute('SELECT COUNT(*) FROM quotes').fetchone()[0]} quotes")
+
 def load_quotes():
-    quotes = list(DEFAULT_QUOTES)
-    if os.path.exists(QUOTES_FILE):
-        try:
-            with open(QUOTES_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                for item in data:
-                    q = (item.get("quote") or "").strip()
-                    a = (item.get("author") or "Unknown").strip() or "Unknown"
-                    if q:
-                        quotes.append((q, a))
-        except Exception:
-            pass
-    return quotes
+    """Load all quotes from database"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
+        return [(row['quote'], row['author']) for row in cursor.fetchall()]
 
 def save_quote(quote, author):
-    data = []
-    if os.path.exists(QUOTES_FILE):
-        try:
-            with open(QUOTES_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, list):
-                data = []
-        except Exception:
-            data = []
-    data.append({"quote": quote, "author": author})
-    with open(QUOTES_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Save a new quote to database"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO quotes (quote, author, is_default) VALUES (?, ?, 0)",
+            (quote, author)
+        )
+        conn.commit()
+        return cursor.lastrowid
 
-# ✅ Serve local images from ./images (NO static/)
+def quote_exists(quote):
+    """Check if quote already exists (case-insensitive)"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM quotes WHERE LOWER(quote) = LOWER(?)", (quote,))
+        return cursor.fetchone()['count'] > 0
+
+# Initialize database on startup
+init_db()
+
+# ✅ Serve local images from ./images
 @app.route("/images/<path:filename>")
 def images(filename):
     images_dir = os.path.join(app.root_path, "images")
     return send_from_directory(images_dir, filename)
 
-# ✅ Normal add (redirect)
+# ✅ API endpoint to get all quotes
+@app.route("/api/quotes", methods=["GET"])
+def api_quotes():
+    """Return all quotes as JSON"""
+    quotes = load_quotes()
+    return jsonify({
+        "ok": True,
+        "count": len(quotes),
+        "quotes": [{"quote": q, "author": a} for q, a in quotes]
+    })
+
+# ✅ API endpoint to get random quote
+@app.route("/api/quote/random", methods=["GET"])
+def api_random_quote():
+    """Return a random quote"""
+    quotes = load_quotes()
+    if not quotes:
+        return jsonify({"ok": False, "message": "No quotes available"}), 404
+    
+    quote, author = random.choice(quotes)
+    return jsonify({
+        "ok": True,
+        "quote": quote,
+        "author": author
+    })
+
+# ✅ Normal add (redirect) - kept for compatibility
 @app.route("/add", methods=["POST"])
 def add():
     quote = (request.form.get("quote") or "").strip()
@@ -66,12 +167,14 @@ def add():
     if not quote:
         return redirect("/?msg=Quote%20cannot%20be%20empty%20%F0%9F%98%BF")
 
-    all_quotes = load_quotes()
-    if any(q.lower() == quote.lower() for q, _ in all_quotes):
+    if quote_exists(quote):
         return redirect("/?msg=Quote%20already%20exists%20%E2%9C%A8")
 
-    save_quote(quote, author)
-    return redirect("/?msg=Saved%20%F0%9F%8C%B8")
+    try:
+        save_quote(quote, author)
+        return redirect("/?msg=Saved%20%F0%9F%8C%B8")
+    except Exception as e:
+        return redirect(f"/?msg=Error:%20{str(e)}")
 
 # ✅ Add via AJAX (no refresh)
 @app.route("/add-json", methods=["POST"])
@@ -80,19 +183,31 @@ def add_json():
     author = (request.form.get("author") or "").strip() or "Unknown"
 
     if not quote:
-        return {"ok": False, "message": "Quote cannot be empty 😿"}, 400
+        return jsonify({"ok": False, "message": "Quote cannot be empty 😿"}), 400
 
-    all_quotes = load_quotes()
-    if any(q.lower() == quote.lower() for q, _ in all_quotes):
-        return {"ok": False, "message": "That quote already exists ✨"}, 409
+    if quote_exists(quote):
+        return jsonify({"ok": False, "message": "That quote already exists ✨"}), 409
 
-    save_quote(quote, author)
-    return {"ok": True, "quote": quote, "author": author, "message": "Saved! 🌸"}
+    try:
+        quote_id = save_quote(quote, author)
+        return jsonify({
+            "ok": True,
+            "id": quote_id,
+            "quote": quote,
+            "author": author,
+            "message": "Saved! 🌸"
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"Database error: {str(e)}"}), 500
 
 @app.route("/")
 def home():
     quotes = load_quotes()
-    quote, author = random.choice(quotes)
+    if not quotes:
+        quote, author = "Stay positive! ✨", "Unknown"
+    else:
+        quote, author = random.choice(quotes)
+    
     msg = (request.args.get("msg") or "").strip()
 
     html = r"""
@@ -125,7 +240,7 @@ def home():
     --pink1:#ffb3c7; --pink2:#ffd6e8;
     --blue1:#b9f3ff; --blue2:#e0f7fa;
 
-    /* Night gradient accents (light mode can still keep pastel) */
+    /* Night gradient accents */
     --nightA:#0b1022;
     --nightB:#1a1140;
     --nightC:#022b3a;
@@ -327,6 +442,16 @@ def home():
   }
   code{ background: color-mix(in srgb, var(--text) 10%, transparent);
     padding: 3px 8px; border-radius:10px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  
+  .badge{
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 900;
+    background: linear-gradient(135deg, var(--pink1), var(--pink2));
+    color: var(--text);
+  }
 </style>
 </head>
 
@@ -343,7 +468,7 @@ def home():
     <div class="nav">
       <div class="brand">
         <div class="logo">🎀</div>
-        <div>Motivation</div>
+        <div>Motivation <span class="badge"></span></div>
       </div>
 
       <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
@@ -356,11 +481,11 @@ def home():
 
     <div class="hero">
       <div>
-        <h1>Today’s Cute Motivation 💖</h1>
+        <h1>Today's Cute Motivation 💖</h1>
         <p>One quote can change your mood. Take a deep breath… you got this ✨</p>
 
         <div class="quoteCard">
-          <div class="quote" id="quoteText">“__QUOTE__”</div>
+          <div class="quote" id="quoteText">"__QUOTE__"</div>
           <div class="author" id="quoteAuthor">— __AUTHOR__</div>
 
           <div class="btnRow">
@@ -371,7 +496,6 @@ def home():
       </div>
 
       <div class="mascot">
-        <!-- ✅ NO static: load from /images -->
         <img src="/images/meow.jpg" alt="Cute cat"/>
         <div class="tip">🐱 Add your own quote below ✨</div>
 
@@ -383,6 +507,8 @@ def home():
         </form>
       </div>
     </div>
+    <div class="footer">
+        <div> Made with by haha 🥰 </div>
   </div>
 
 <script>
@@ -418,15 +544,19 @@ def home():
     }
   });
 
-  // Quotes (client side) — includes user-added
-  const QUOTES = __QUOTES_JSON__;
+  // Quotes (client side) — loaded from API
+  let QUOTES = __QUOTES_JSON__;
 
   const quoteText = document.getElementById("quoteText");
   const quoteAuthor = document.getElementById("quoteAuthor");
+  const quoteCount = document.getElementById("quoteCount");
+
+  // Update quote count
+  quoteCount.textContent = `${QUOTES.length}`;
 
   document.getElementById("btnNew").addEventListener("click", () => {
     const [q, a] = QUOTES[Math.floor(Math.random() * QUOTES.length)];
-    quoteText.textContent = `“${q}”`;
+    quoteText.textContent = `"${q}"`;
     quoteAuthor.textContent = `— ${a}`;
   });
 
@@ -461,8 +591,9 @@ def home():
 
       // Add to local list + show immediately
       QUOTES.push([data.quote, data.author]);
-      quoteText.textContent = `“${data.quote}”`;
+      quoteText.textContent = `"${data.quote}"`;
       quoteAuthor.textContent = `— ${data.author}`;
+      quoteCount.textContent = `${QUOTES.length}`;
 
       quoteInput.value = "";
       authorInput.value = "";
@@ -480,10 +611,10 @@ def home():
     msg_block = f'<div class="msg">✨ {msg}</div>' if msg else ""
     html = html.replace("__MSG_BLOCK__", msg_block)
 
-    # Fill placeholders (NO f-string!)
+    # Fill placeholders
     html = html.replace("__QUOTE__", quote).replace("__AUTHOR__", author)
 
-    quotes_json = json.dumps(load_quotes(), ensure_ascii=False)
+    quotes_json = json.dumps(quotes, ensure_ascii=False)
     html = html.replace("__QUOTES_JSON__", quotes_json)
 
     return html
