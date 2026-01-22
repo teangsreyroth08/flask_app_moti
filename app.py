@@ -29,134 +29,189 @@ DEFAULT_QUOTES = [
 
 if POSTGRES_URL:
     # Use Vercel Postgres (production)
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-    from contextlib import contextmanager
-    
-    @contextmanager
-    def get_db():
-        conn = psycopg2.connect(POSTGRES_URL)
-        try:
-            yield conn
-        finally:
-            conn.close()
-    
-    def init_db():
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS quotes (
-                    id SERIAL PRIMARY KEY,
-                    quote TEXT NOT NULL UNIQUE,
-                    author TEXT NOT NULL DEFAULT 'Unknown',
-                    is_default BOOLEAN NOT NULL DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        from contextlib import contextmanager
+        
+        @contextmanager
+        def get_db():
+            conn = psycopg2.connect(POSTGRES_URL)
+            try:
+                yield conn
+            finally:
+                conn.close()
+        
+        def init_db():
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS quotes (
+                            id SERIAL PRIMARY KEY,
+                            quote TEXT NOT NULL UNIQUE,
+                            author TEXT NOT NULL DEFAULT 'Unknown',
+                            is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    
+                    cursor.execute("SELECT COUNT(*) FROM quotes")
+                    count = cursor.fetchone()[0]
+                    
+                    if count == 0:
+                        for quote, author in DEFAULT_QUOTES:
+                            cursor.execute(
+                                "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, TRUE) ON CONFLICT (quote) DO NOTHING",
+                                (quote, author)
+                            )
+                    
+                    conn.commit()
+                    cursor.execute("SELECT COUNT(*) FROM quotes")
+                    print(f"✅ Postgres initialized with {cursor.fetchone()[0]} quotes")
+            except Exception as e:
+                print(f"⚠️ DB init error: {e}")
+        
+        def load_quotes():
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
+                    return [(row[0], row[1]) for row in cursor.fetchall()]
+            except Exception as e:
+                print(f"⚠️ Load error: {e}")
+                return list(DEFAULT_QUOTES)
+        
+        def save_quote(quote, author):
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, FALSE) RETURNING id",
+                    (quote, author)
                 )
-            """)
-            
-            cursor.execute("SELECT COUNT(*) FROM quotes")
-            count = cursor.fetchone()[0]
-            
-            if count == 0:
-                for quote, author in DEFAULT_QUOTES:
-                    cursor.execute(
-                        "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, TRUE) ON CONFLICT (quote) DO NOTHING",
-                        (quote, author)
-                    )
-            
-            conn.commit()
-            cursor.execute("SELECT COUNT(*) FROM quotes")
-            print(f"✅ Postgres initialized with {cursor.fetchone()[0]} quotes")
-    
-    def load_quotes():
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
-            return [(row[0], row[1]) for row in cursor.fetchall()]
-    
-    def save_quote(quote, author):
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, FALSE) RETURNING id",
-                (quote, author)
-            )
-            conn.commit()
-            return cursor.fetchone()[0]
-    
-    def quote_exists(quote):
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM quotes WHERE LOWER(quote) = LOWER(%s)", (quote,))
-            return cursor.fetchone()[0] > 0
+                conn.commit()
+                return cursor.fetchone()[0]
+        
+        def quote_exists(quote):
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM quotes WHERE LOWER(quote) = LOWER(%s)", (quote,))
+                return cursor.fetchone()[0] > 0
+        
+        HAS_DATABASE = True
+        
+    except ImportError:
+        print("⚠️ psycopg2 not installed - using in-memory fallback")
+        HAS_DATABASE = False
 
 else:
     # Use SQLite (local development)
-    import sqlite3
-    from contextlib import contextmanager
+    try:
+        import sqlite3
+        from contextlib import contextmanager
+        
+        if IS_SERVERLESS:
+            DB_FILE = "/tmp/quotes.db"
+        else:
+            DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quotes.db")
+        
+        @contextmanager
+        def get_db():
+            conn = sqlite3.connect(DB_FILE)
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+            finally:
+                conn.close()
+        
+        def init_db():
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS quotes (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            quote TEXT NOT NULL UNIQUE,
+                            author TEXT NOT NULL DEFAULT 'Unknown',
+                            is_default BOOLEAN NOT NULL DEFAULT 0,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    
+                    cursor.execute("SELECT COUNT(*) as count FROM quotes")
+                    count = cursor.fetchone()['count']
+                    
+                    if count == 0:
+                        for quote, author in DEFAULT_QUOTES:
+                            cursor.execute(
+                                "INSERT OR IGNORE INTO quotes (quote, author, is_default) VALUES (?, ?, 1)",
+                                (quote, author)
+                            )
+                    
+                    conn.commit()
+                    cursor.execute('SELECT COUNT(*) FROM quotes')
+                    env = "ephemeral /tmp" if IS_SERVERLESS else "local persistent"
+                    print(f"✅ SQLite initialized ({env}) with {cursor.fetchone()[0]} quotes")
+            except Exception as e:
+                print(f"⚠️ DB init error: {e}")
+        
+        def load_quotes():
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
+                    return [(row['quote'], row['author']) for row in cursor.fetchall()]
+            except Exception as e:
+                print(f"⚠️ Load error: {e}")
+                return list(DEFAULT_QUOTES)
+        
+        def save_quote(quote, author):
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO quotes (quote, author, is_default) VALUES (?, ?, 0)",
+                    (quote, author)
+                )
+                conn.commit()
+                return cursor.lastrowid
+        
+        def quote_exists(quote):
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) as count FROM quotes WHERE LOWER(quote) = LOWER(?)", (quote,))
+                return cursor.fetchone()['count'] > 0
+        
+        HAS_DATABASE = True
+        
+    except Exception as e:
+        print(f"⚠️ SQLite error: {e}")
+        HAS_DATABASE = False
+
+# Fallback to in-memory if no database available
+if not HAS_DATABASE or ('HAS_DATABASE' not in dir() and not POSTGRES_URL):
+    print("⚠️ Using in-memory fallback (data will not persist)")
     
-    DB_FILE = os.path.join(app.root_path, "quotes.db")
-    
-    @contextmanager
-    def get_db():
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-        finally:
-            conn.close()
+    # In-memory storage
+    QUOTES_STORE = list(DEFAULT_QUOTES)
     
     def init_db():
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS quotes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    quote TEXT NOT NULL UNIQUE,
-                    author TEXT NOT NULL DEFAULT 'Unknown',
-                    is_default BOOLEAN NOT NULL DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            cursor.execute("SELECT COUNT(*) as count FROM quotes")
-            count = cursor.fetchone()['count']
-            
-            if count == 0:
-                for quote, author in DEFAULT_QUOTES:
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO quotes (quote, author, is_default) VALUES (?, ?, 1)",
-                        (quote, author)
-                    )
-            
-            conn.commit()
-            cursor.execute('SELECT COUNT(*) FROM quotes')
-            print(f"✅ SQLite initialized with {cursor.fetchone()[0]} quotes")
+        print("✅ In-memory storage initialized")
     
     def load_quotes():
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
-            return [(row['quote'], row['author']) for row in cursor.fetchall()]
+        return QUOTES_STORE
     
     def save_quote(quote, author):
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO quotes (quote, author, is_default) VALUES (?, ?, 0)",
-                (quote, author)
-            )
-            conn.commit()
-            return cursor.lastrowid
+        QUOTES_STORE.append((quote, author))
+        return len(QUOTES_STORE)
     
     def quote_exists(quote):
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as count FROM quotes WHERE LOWER(quote) = LOWER(?)", (quote,))
-            return cursor.fetchone()['count'] > 0
+        return any(q.lower() == quote.lower() for q, _ in QUOTES_STORE)
 
 # Initialize database on startup
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"⚠️ Init failed: {e}")
 
 # ============================================================
 # ROUTES
@@ -164,60 +219,69 @@ init_db()
 
 @app.route("/images/<path:filename>")
 def images(filename):
-    images_dir = os.path.join(app.root_path, "images")
-    return send_from_directory(images_dir, filename)
+    try:
+        images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
+        return send_from_directory(images_dir, filename)
+    except Exception as e:
+        return f"Image not found: {e}", 404
 
 @app.route("/api/quotes", methods=["GET"])
 def api_quotes():
-    quotes = load_quotes()
-    return jsonify({
-        "ok": True,
-        "count": len(quotes),
-        "quotes": [{"quote": q, "author": a} for q, a in quotes]
-    })
+    try:
+        quotes = load_quotes()
+        return jsonify({
+            "ok": True,
+            "count": len(quotes),
+            "quotes": [{"quote": q, "author": a} for q, a in quotes]
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/quote/random", methods=["GET"])
 def api_random_quote():
-    quotes = load_quotes()
-    if not quotes:
-        return jsonify({"ok": False, "message": "No quotes available"}), 404
-    
-    quote, author = random.choice(quotes)
-    return jsonify({
-        "ok": True,
-        "quote": quote,
-        "author": author
-    })
+    try:
+        quotes = load_quotes()
+        if not quotes:
+            return jsonify({"ok": False, "message": "No quotes available"}), 404
+        
+        quote, author = random.choice(quotes)
+        return jsonify({
+            "ok": True,
+            "quote": quote,
+            "author": author
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/add", methods=["POST"])
 def add():
-    quote = (request.form.get("quote") or "").strip()
-    author = (request.form.get("author") or "").strip() or "Unknown"
-
-    if not quote:
-        return redirect("/?msg=Quote%20cannot%20be%20empty%20%F0%9F%98%BF")
-
-    if quote_exists(quote):
-        return redirect("/?msg=Quote%20already%20exists%20%E2%9C%A8")
-
     try:
+        quote = (request.form.get("quote") or "").strip()
+        author = (request.form.get("author") or "").strip() or "Unknown"
+
+        if not quote:
+            return redirect("/?msg=Quote%20cannot%20be%20empty%20%F0%9F%98%BF")
+
+        if quote_exists(quote):
+            return redirect("/?msg=Quote%20already%20exists%20%E2%9C%A8")
+
         save_quote(quote, author)
         return redirect("/?msg=Saved%20%F0%9F%8C%B8")
     except Exception as e:
-        return redirect(f"/?msg=Error:%20{str(e)}")
+        return redirect(f"/?msg=Error:%20{str(e)[:50]}")
 
 @app.route("/add-json", methods=["POST"])
 def add_json():
-    quote = (request.form.get("quote") or "").strip()
-    author = (request.form.get("author") or "").strip() or "Unknown"
-
-    if not quote:
-        return jsonify({"ok": False, "message": "Quote cannot be empty 😿"}), 400
-
-    if quote_exists(quote):
-        return jsonify({"ok": False, "message": "That quote already exists ✨"}), 409
-
     try:
+        quote = (request.form.get("quote") or "").strip()
+        author = (request.form.get("author") or "").strip() or "Unknown"
+
+        if not quote:
+            return jsonify({"ok": False, "message": "Quote cannot be empty 😿"}), 400
+
+        if quote_exists(quote):
+            return jsonify({"ok": False, "message": "That quote already exists ✨"}), 409
+
         quote_id = save_quote(quote, author)
         return jsonify({
             "ok": True,
@@ -227,19 +291,20 @@ def add_json():
             "message": "Saved! 🌸"
         })
     except Exception as e:
-        return jsonify({"ok": False, "message": f"Database error: {str(e)}"}), 500
+        return jsonify({"ok": False, "message": f"Error: {str(e)}"}), 500
 
 @app.route("/")
 def home():
-    quotes = load_quotes()
-    if not quotes:
-        quote, author = "Stay positive! ✨", "Unknown"
-    else:
-        quote, author = random.choice(quotes)
-    
-    msg = (request.args.get("msg") or "").strip()
+    try:
+        quotes = load_quotes()
+        if not quotes:
+            quote, author = "Stay positive! ✨", "Unknown"
+        else:
+            quote, author = random.choice(quotes)
+        
+        msg = (request.args.get("msg") or "").strip()
 
-    html = r"""
+        html = r"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -451,7 +516,7 @@ def home():
     <div class="nav">
       <div class="brand">
         <div class="logo">🎀</div>
-        <div>Motivation <span class="badge"></span></div>
+        <div>Motivation </div>
       </div>
 
       <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
@@ -479,7 +544,7 @@ def home():
       </div>
 
       <div class="mascot">
-        <img src="/images/meow.jpg" alt="Cute cat"/>
+        <img src="/images/meow.jpg" alt="Cute cat" onerror="this.style.display='none'"/>
         <div class="tip">🐱 Add your own quote below ✨</div>
 
         <form class="form" id="addForm" method="POST" action="/add-json">
@@ -488,6 +553,10 @@ def home():
           <button class="btn" type="submit">🌸 Save quote</button>
         </form>
       </div>
+    </div>
+    
+    <div class="footer">
+      <div>💌 <span id="quoteCount">__COUNT__</span> quotes stored</div>
     </div>
   </div>
 
@@ -574,20 +643,39 @@ def home():
 </script>
 </body>
 </html>
-    """
+        """
 
-    msg_block = f'<div class="msg">✨ {msg}</div>' if msg else ""
-    html = html.replace("__MSG_BLOCK__", msg_block)
-    html = html.replace("__QUOTE__", quote).replace("__AUTHOR__", author)
-    html = html.replace("__COUNT__", str(len(quotes)))
+        msg_block = f'<div class="msg">✨ {msg}</div>' if msg else ""
+        html = html.replace("__MSG_BLOCK__", msg_block)
+        html = html.replace("__QUOTE__", quote).replace("__AUTHOR__", author)
+        html = html.replace("__COUNT__", str(len(quotes)))
+        
+        if POSTGRES_URL:
+            db_type = "PG"
+        elif IS_SERVERLESS:
+            db_type = "/tmp"
+        else:
+            db_type = "SQLite"
+        html = html.replace("__DB_TYPE__", db_type)
+
+        quotes_json = json.dumps(quotes, ensure_ascii=False)
+        html = html.replace("__QUOTES_JSON__", quotes_json)
+
+        return html
     
-    db_type = "PG" if POSTGRES_URL else "SQLite"
-    html = html.replace("__DB_TYPE__", db_type)
+    except Exception as e:
+        return f"""
+        <html>
+        <body style="font-family: system-ui; padding: 40px; max-width: 600px; margin: 0 auto;">
+        <h1>🚨 Application Error</h1>
+        <p><strong>Error:</strong> {str(e)}</p>
+        <p>Check Vercel logs for details</p>
+        </body>
+        </html>
+        """, 500
 
-    quotes_json = json.dumps(quotes, ensure_ascii=False)
-    html = html.replace("__QUOTES_JSON__", quotes_json)
-
-    return html
+# For Vercel serverless
+app = app
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
