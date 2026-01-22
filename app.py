@@ -311,14 +311,14 @@ def home():
 
         # Example mascot image (optional):
         # Put file: images/meow.jpg  OR  public/images/meow.jpg
-        mascot_img_tag = '<img src="/images/meow.jpg" alt="cat"/>' if os.path.isfile(os.path.join(IMAGES_DIR, "meow.jpg")) else '<div style="font-size:80px"></div>'
+        mascot_img_tag = '<img src="/images/meow.jpg" alt="cat"/>' if os.path.isfile(os.path.join(IMAGES_DIR, "meow.jpg")) else '<div style="font-size:clamp(60px,12vw,80px)">🐱</div>'
 
         html = r"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes"/>
 <title>Motivation 💖</title>
 <script>
 (function(){
@@ -331,11 +331,12 @@ def home():
 <style>
 :root{--bg1:#ffd6e8;--bg2:#e0f7fa;--card:#fff;--text:#2b2b2b;--muted:#5a5a5a;--shadow:rgba(0,0,0,.18);--glass:rgba(255,255,255,.72);--glassBorder:rgba(255,255,255,.45);--ring:rgba(255,111,145,.35);--pink1:#ffb3c7;--pink2:#ffd6e8;--blue1:#b9f3ff;--blue2:#e0f7fa;--nightA:#0b1022;--nightB:#1a1140;--nightC:#022b3a;--stars:rgba(255,255,255,.12)}
 [data-theme="dark"]{--bg1:var(--nightA);--bg2:var(--nightB);--card:#0b1222;--text:#f8fafc;--muted:#cbd5f5;--shadow:rgba(0,0,0,.62);--glass:rgba(11,18,34,.78);--glassBorder:rgba(255,255,255,.1);--ring:rgba(85,214,255,.28)}
-*{box-sizing:border-box}
+*{box-sizing:border-box;margin:0;padding:0}
+html{overflow-x:hidden;overflow-y:auto;min-height:100vh}
 html,body,.card,.nav,.quoteCard,.mascot,textarea,input,.btn,.footer,.msg,.toggle{transition:background-color .35s ease,color .35s ease,border-color .35s ease,box-shadow .35s ease,filter .35s ease,transform .2s ease}
-body{margin:0;min-height:100vh;display:flex;justify-content:center;align-items:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);padding:clamp(12px,3vw,18px);overflow-x:hidden;overflow-y:auto;background:radial-gradient(1200px 800px at 20% 20%,var(--bg1),transparent 60%),radial-gradient(1200px 800px at 80% 80%,var(--bg2),transparent 60%),linear-gradient(135deg,var(--bg1),var(--bg2))}
-[data-theme="dark"] body{background:radial-gradient(900px 600px at 20% 15%,rgba(120,90,255,.25),transparent 60%),radial-gradient(900px 600px at 80% 85%,rgba(0,200,255,.15),transparent 60%),radial-gradient(1200px 800px at 50% 50%,rgba(255,255,255,.06),transparent 65%),linear-gradient(135deg,var(--nightA),var(--nightB) 45%,var(--nightC))}
-.stars{position:fixed;inset:0;pointer-events:none;background:
+body{min-height:100vh;display:flex;flex-direction:column;justify-content:flex-start;align-items:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);padding:clamp(12px,3vw,20px) clamp(12px,2.5vw,18px);background:radial-gradient(1200px 800px at 20% 20%,var(--bg1),transparent 60%),radial-gradient(1200px 800px at 80% 80%,var(--bg2),transparent 60%),linear-gradient(135deg,var(--bg1),var(--bg2));background-attachment:fixed}
+[data-theme="dark"] body{background:radial-gradient(900px 600px at 20% 15%,rgba(120,90,255,.25),transparent 60%),radial-gradient(900px 600px at 80% 85%,rgba(0,200,255,.15),transparent 60%),radial-gradient(1200px 800px at 50% 50%,rgba(255,255,255,.06),transparent 65%),linear-gradient(135deg,var(--nightA),var(--nightB) 45%,var(--nightC));background-attachment:fixed}
+.stars{position:fixed;inset:0;pointer-events:none;z-index:0;background:
 radial-gradient(circle at 12% 20%,var(--stars) 0 1px,transparent 2px),
 radial-gradient(circle at 25% 70%,var(--stars) 0 1px,transparent 2px),
 radial-gradient(circle at 44% 35%,var(--stars) 0 1px,transparent 2px),
@@ -346,54 +347,54 @@ radial-gradient(circle at 10% 88%,var(--stars) 0 1px,transparent 2px),
 radial-gradient(circle at 92% 86%,var(--stars) 0 1px,transparent 2px);
 opacity:0;transition:opacity .35s ease}
 [data-theme="dark"] .stars{opacity:1}
-.petal{position:absolute;top:-12%;font-size:clamp(16px,3vw,22px);opacity:.88;animation:fall linear infinite;user-select:none;pointer-events:none}
-@keyframes fall{0%{transform:translateY(-10vh) rotate(0deg)}100%{transform:translateY(110vh) rotate(360deg)}}
-.card{width:min(940px,100%);background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(10px);border-radius:clamp(16px,3vw,24px);padding:clamp(16px,3vw,22px) clamp(14px,2.5vw,18px) clamp(14px,2.5vw,18px);border:1px solid color-mix(in srgb,var(--card) 70%,transparent);box-shadow:0 20px 50px var(--shadow);animation:enter .75s ease;margin:clamp(12px,2vw,20px) 0}
+.petal{position:fixed;font-size:clamp(16px,3vw,22px);opacity:.88;animation:fall linear infinite;user-select:none;pointer-events:none;z-index:1}
+@keyframes fall{0%{top:-5%;transform:translateX(0) rotate(0deg)}100%{top:110%;transform:translateX(10px) rotate(360deg)}}
+.card{width:100%;max-width:940px;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(10px);border-radius:clamp(16px,3vw,24px);padding:clamp(16px,3vw,22px) clamp(14px,2.5vw,18px) clamp(14px,2.5vw,18px);border:1px solid color-mix(in srgb,var(--card) 70%,transparent);box-shadow:0 20px 50px var(--shadow);animation:enter .75s ease;position:relative;z-index:10}
 @keyframes enter{0%{transform:translateY(10px) scale(.98);opacity:0}100%{transform:translateY(0) scale(1);opacity:1}}
 .nav{display:flex;align-items:center;justify-content:space-between;gap:clamp(10px,2vw,14px);padding:clamp(8px,1.5vw,10px) clamp(10px,2vw,12px);border-radius:clamp(14px,2.5vw,18px);background:var(--glass);border:1px solid var(--glassBorder);box-shadow:0 10px 22px var(--shadow);margin-bottom:clamp(12px,2vw,16px);flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:clamp(8px,1.5vw,10px);font-weight:950;font-size:clamp(14px,2vw,16px);min-width:0}
-.logo{width:clamp(28px,5vw,34px);height:clamp(28px,5vw,34px);border-radius:clamp(10px,2vw,12px);display:grid;place-items:center;background:linear-gradient(135deg,var(--pink1),var(--blue1));box-shadow:0 10px 18px var(--shadow);animation:wiggle 2.8s ease-in-out infinite;font-size:clamp(16px,3vw,20px)}
+.brand{display:flex;align-items:center;gap:clamp(8px,1.5vw,10px);font-weight:950;font-size:clamp(14px,2vw,16px);flex:1;min-width:0}
+.brand>div:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.logo{width:clamp(28px,5vw,34px);height:clamp(28px,5vw,34px);flex-shrink:0;border-radius:clamp(10px,2vw,12px);display:grid;place-items:center;background:linear-gradient(135deg,var(--pink1),var(--blue1));box-shadow:0 10px 18px var(--shadow);animation:wiggle 2.8s ease-in-out infinite;font-size:clamp(16px,3vw,20px)}
 @keyframes wiggle{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
-.toggle{display:inline-flex;align-items:center;gap:clamp(8px,1.5vw,10px);padding:clamp(7px,1.5vw,9px) clamp(8px,1.5vw,10px);border-radius:clamp(12px,2vw,14px);background:color-mix(in srgb,var(--glass) 85%,transparent);border:1px solid var(--glassBorder);cursor:pointer;user-select:none;outline:none;font-size:clamp(14px,2vw,16px);margin-left:auto}
+.toggle{display:inline-flex;align-items:center;gap:clamp(8px,1.5vw,10px);padding:clamp(7px,1.5vw,9px) clamp(8px,1.5vw,10px);border-radius:clamp(12px,2vw,14px);background:color-mix(in srgb,var(--glass) 85%,transparent);border:1px solid var(--glassBorder);cursor:pointer;user-select:none;outline:none;font-size:clamp(14px,2vw,16px);flex-shrink:0}
 @media(hover:hover){.toggle:hover{transform:translateY(-1px)}}
 .toggle:active{transform:scale(.98)}
 .switch{width:clamp(40px,8vw,46px);height:clamp(22px,4.5vw,26px);border-radius:999px;position:relative;background:color-mix(in srgb,var(--text) 15%,transparent);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--text) 12%,transparent)}
 .knob{width:clamp(18px,4vw,22px);height:clamp(18px,4vw,22px);border-radius:999px;position:absolute;top:2px;left:2px;background:var(--card);transition:left .18s ease;box-shadow:0 8px 16px var(--shadow)}
 [data-theme="dark"] .knob{left:calc(100% - clamp(18px,4vw,22px) - 2px)}
-.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:clamp(12px,2vw,16px);align-items:stretch;min-width:0}
-@media (max-width:760px){.hero{grid-template-columns:1fr}}
-h1{margin:clamp(8px,1.5vw,10px) 0 clamp(4px,1vw,6px);font-size:clamp(22px,5vw,42px);letter-spacing:-.02em;line-height:1.2}
-p{margin:0 0 clamp(10px,2vw,14px);color:var(--muted);line-height:1.5;font-size:clamp(14px,2vw,16px)}
-.quoteCard{padding:clamp(14px,2.5vw,18px) clamp(12px,2vw,16px);border-radius:clamp(16px,3vw,20px);background:var(--glass);border:1px solid var(--glassBorder);box-shadow:0 16px 28px var(--shadow);min-width:0}
-.quote{font-size:clamp(16px,3.5vw,24px);font-weight:900;line-height:1.35;overflow-wrap:anywhere;word-break:break-word;hyphens:auto}
-.author{margin-top:clamp(8px,1.5vw,10px);font-weight:850;color:var(--muted);font-size:clamp(13px,2vw,15px)}
-.btnRow{display:flex;flex-wrap:wrap;gap:clamp(8px,1.5vw,10px);margin-top:clamp(10px,2vw,12px)}
-.btn{border:0;padding:clamp(10px,2vw,12px) clamp(12px,2.5vw,14px);border-radius:clamp(12px,2.5vw,16px);font-weight:950;cursor:pointer;box-shadow:0 10px 22px var(--shadow);transition:transform .12s ease,box-shadow .12s ease;outline:none;background:linear-gradient(135deg,var(--pink1),var(--pink2));font-size:clamp(13px,2vw,15px);white-space:nowrap}
+.hero{display:grid;grid-template-columns:1fr;gap:clamp(14px,2.5vw,18px);width:100%}
+@media (min-width:761px){.hero{grid-template-columns:1.2fr .8fr}}
+h1{margin:clamp(8px,1.5vw,10px) 0 clamp(4px,1vw,6px);font-size:clamp(24px,5.5vw,42px);letter-spacing:-.02em;line-height:1.2}
+p{margin:0 0 clamp(10px,2vw,14px);color:var(--muted);line-height:1.6;font-size:clamp(14px,2vw,16px)}
+.quoteCard{padding:clamp(16px,3vw,20px) clamp(14px,2.5vw,18px);border-radius:clamp(16px,3vw,20px);background:var(--glass);border:1px solid var(--glassBorder);box-shadow:0 16px 28px var(--shadow)}
+.quote{font-size:clamp(17px,4vw,24px);font-weight:900;line-height:1.4;overflow-wrap:anywhere;word-break:break-word;hyphens:auto}
+.author{margin-top:clamp(10px,2vw,12px);font-weight:850;color:var(--muted);font-size:clamp(13px,2vw,15px)}
+.btnRow{display:flex;flex-wrap:wrap;gap:clamp(8px,1.5vw,10px);margin-top:clamp(12px,2.5vw,14px)}
+.btn{border:0;padding:clamp(11px,2.2vw,13px) clamp(14px,3vw,18px);border-radius:clamp(12px,2.5vw,16px);font-weight:950;cursor:pointer;box-shadow:0 10px 22px var(--shadow);transition:transform .12s ease,box-shadow .12s ease;outline:none;background:linear-gradient(135deg,var(--pink1),var(--pink2));font-size:clamp(13px,2vw,15px);white-space:nowrap;flex:1;min-width:120px}
 @media(hover:hover){.btn:hover{transform:translateY(-3px)}}
 .btn:active{transform:scale(.98)}
 .btn:focus{box-shadow:0 0 0 4px var(--ring),0 10px 22px var(--shadow)}
 .btn.secondary{background:linear-gradient(135deg,var(--blue1),var(--blue2))}
-.mascot{border-radius:clamp(16px,3vw,22px);background:linear-gradient(135deg,color-mix(in srgb,var(--blue1) 55%,transparent),color-mix(in srgb,var(--pink1) 55%,transparent));border:1px solid color-mix(in srgb,var(--card) 55%,transparent);box-shadow:0 16px 28px var(--shadow);padding:clamp(12px,2.5vw,14px);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:clamp(8px,1.5vw,10px);min-height:clamp(200px,35vw,240px);width:100%;min-width:0}
-.mascot img{width:min(320px,100%);height:auto;border-radius:clamp(16px,3vw,20px);box-shadow:0 18px 30px var(--shadow)}
-.tip{font-weight:900;color:var(--muted);text-align:center;font-size:clamp(13px,2vw,15px)}
-.form{width:100%;display:grid;gap:clamp(8px,1.5vw,10px);margin-top:clamp(6px,1.5vw,8px)}
-textarea,input{width:100%;padding:clamp(10px,2vw,12px);border-radius:clamp(12px,2.5vw,16px);border:1px solid color-mix(in srgb,var(--text) 18%,transparent);background:color-mix(in srgb,var(--card) 82%,transparent);color:var(--text);font:inherit;outline:none;font-size:clamp(14px,2vw,16px)}
-textarea{min-height:clamp(70px,15vw,90px);resize:vertical}
-.msg{margin-bottom:clamp(10px,2vw,14px);padding:clamp(8px,1.5vw,10px) clamp(10px,2vw,12px);border-radius:clamp(12px,2.5vw,16px);background:var(--glass);border:1px solid var(--glassBorder);font-weight:900;color:var(--text);font-size:clamp(13px,2vw,15px)}
-.footer{margin-top:clamp(10px,2vw,14px);display:flex;flex-wrap:wrap;justify-content:space-between;gap:clamp(8px,1.5vw,10px);color:color-mix(in srgb,var(--muted) 85%,transparent);font-size:clamp(11px,1.8vw,13px);align-items:center}
-.badge{display:inline-block;padding:clamp(3px,0.7vw,4px) clamp(7px,1.5vw,10px);border-radius:clamp(10px,2vw,12px);font-size:clamp(9px,1.6vw,11px);font-weight:900;background:linear-gradient(135deg,var(--pink1),var(--pink2));color:var(--text)}
-@media (max-width:520px){.btnRow{flex-direction:column}.btn{width:100%;text-align:center}}
-@media (max-width:760px){.mascot{min-height:auto}}
-@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
+.mascot{border-radius:clamp(16px,3vw,22px);background:linear-gradient(135deg,color-mix(in srgb,var(--blue1) 55%,transparent),color-mix(in srgb,var(--pink1) 55%,transparent));border:1px solid color-mix(in srgb,var(--card) 55%,transparent);box-shadow:0 16px 28px var(--shadow);padding:clamp(14px,3vw,18px);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:clamp(10px,2vw,12px);min-height:auto}
+.mascot img{width:100%;max-width:280px;height:auto;border-radius:clamp(14px,2.5vw,18px);box-shadow:0 18px 30px var(--shadow)}
+.tip{font-weight:900;color:var(--muted);text-align:center;font-size:clamp(13px,2vw,15px);line-height:1.4}
+.form{width:100%;display:grid;gap:clamp(10px,2vw,12px);margin-top:clamp(8px,1.5vw,10px)}
+textarea,input{width:100%;padding:clamp(11px,2.2vw,13px);border-radius:clamp(12px,2.5vw,16px);border:1px solid color-mix(in srgb,var(--text) 18%,transparent);background:color-mix(in srgb,var(--card) 82%,transparent);color:var(--text);font:inherit;outline:none;font-size:clamp(14px,2vw,16px)}
+textarea{min-height:clamp(80px,16vw,100px);resize:vertical}
+.msg{margin-bottom:clamp(12px,2.5vw,16px);padding:clamp(10px,2vw,12px) clamp(12px,2.5vw,14px);border-radius:clamp(12px,2.5vw,16px);background:var(--glass);border:1px solid var(--glassBorder);font-weight:900;color:var(--text);font-size:clamp(13px,2vw,15px)}
+.footer{margin-top:clamp(12px,2.5vw,16px);padding-top:clamp(10px,2vw,12px);border-top:1px solid color-mix(in srgb,var(--text) 8%,transparent);display:flex;flex-wrap:wrap;justify-content:center;gap:clamp(8px,1.5vw,10px);color:color-mix(in srgb,var(--muted) 85%,transparent);font-size:clamp(12px,1.8vw,14px);text-align:center}
+.badge{display:inline-block;padding:clamp(3px,0.7vw,4px) clamp(8px,1.6vw,10px);border-radius:clamp(10px,2vw,12px);font-size:clamp(9px,1.6vw,11px);font-weight:900;background:linear-gradient(135deg,var(--pink1),var(--pink2));color:var(--text)}
+@media (max-width:480px){.btnRow{flex-direction:column}.btn{min-width:0;width:100%}}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}}
 </style>
 </head>
 <body>
 <div class="stars"></div>
-<span class="petal" style="left:12%;animation-duration:9s">🌸</span>
-<span class="petal" style="left:28%;animation-duration:12s">🌸</span>
-<span class="petal" style="left:46%;animation-duration:10s">🌸</span>
-<span class="petal" style="left:64%;animation-duration:13s">🌸</span>
-<span class="petal" style="left:82%;animation-duration:11s">🌸</span>
+<div class="petal" style="left:12%;animation-duration:9s">🌸</div>
+<div class="petal" style="left:28%;animation-duration:12s">🌸</div>
+<div class="petal" style="left:46%;animation-duration:10s">🌸</div>
+<div class="petal" style="left:64%;animation-duration:13s">🌸</div>
+<div class="petal" style="left:82%;animation-duration:11s">🌸</div>
 
 <div class="card">
   <div class="nav">
@@ -431,7 +432,7 @@ textarea{min-height:clamp(70px,15vw,90px);resize:vertical}
   </div>
 
   <div class="footer">
-    <div>💌 <span id="quoteCount">__COUNT__</span> quotes</div>
+    <div>💌 <span id="quoteCount">__COUNT__</span> quotes stored</div>
   </div>
 </div>
 
@@ -489,7 +490,7 @@ addForm.addEventListener("submit",async e=>{
         elif IS_SERVERLESS:
             db_type = "tmp"
         else:
-            db_type = ""
+            db_type = "SQLite"
         html = html.replace("__DB_TYPE__", db_type)
 
         html = html.replace("__MASCOT__", mascot_img_tag)
