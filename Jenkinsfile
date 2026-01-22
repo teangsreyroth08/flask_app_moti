@@ -1,11 +1,11 @@
-pipeline {
-  agent any
+// pipeline {
+//   agent any
 
-  stages {
-    stage('Test') {
-      steps {
-        echo 'Hello! leave me alone.'
-      }
-    }
-  }
-}
+//   stages {
+//     stage('Test') {
+//       steps {
+//         echo 'Hello! leave me alone.'
+//       }
+//     }
+//   }
+// }
