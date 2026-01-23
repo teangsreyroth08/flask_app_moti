@@ -79,8 +79,8 @@ jobs:
             fi
 
             curl -X POST \
-            "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+            "https://api.telegram.org/bot7077675840:AAGp6gPDJLko-DK4YNWhqh7beEUjSNC8QmA/sendMessage" \
+            -d chat_id=628390613 \
             -d text="
                 ${STATUS_TITLE}
                 ******
