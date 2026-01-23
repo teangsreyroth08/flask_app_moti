@@ -63,6 +63,7 @@ jobs:
   Notification:
     name: Notify Telegram
     runs-on: ubuntu-latest
+    needs: build_and_push
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Send Telegram message
