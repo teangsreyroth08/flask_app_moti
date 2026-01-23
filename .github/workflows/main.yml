@@ -73,6 +73,14 @@ jobs:
           POSTGRES_DB: quotesdb
         ports:
           - 5432:5432
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image  
 
   deploy:
     runs-on: ubuntu-latest
@@ -80,6 +88,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
         with:
           name: docker-image
           path: .
@@ -93,6 +104,11 @@ jobs:
             --env-file .env \
             --restart unless-stopped \
             demo-flask:${{ github.sha }}
+      - name: Verify deployment
+        run: |
+          sleep 10
+          curl -f http://localhost:8000/ || exit 1  
+          
 
 
 
