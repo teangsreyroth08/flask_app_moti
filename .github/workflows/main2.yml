@@ -69,7 +69,7 @@ jobs:
       - name: Send Telegram message
         run: |
           curl -sS -X POST "https://api.telegram.org/bot7077675840:AAGp6gPDJLko-DK4YNWhqh7beEUjSNC8QmA/sendMessage" \
-            -d "chat_id=6356040267" \
+            -d "chat_id=551247005" \
             -d "text=Deployment completed successfully for commit ${{ github.sha }}!"
 
 
