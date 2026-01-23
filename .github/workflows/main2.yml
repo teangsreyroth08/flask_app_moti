@@ -59,3 +59,17 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/motivation-app:latest
             ghcr.io/${{ github.repository_owner }}/motivation-app:${{ github.sha }}
+
+  Notification:
+    name: Notify Telegram
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Send Telegram message
+        run: |
+          curl -sS -X POST "https://api.telegram.org/bot$6356040267:AAFRn_Kb3M2BECcSMepIQfu6Blo2_L-5TQU/sendMessage" \
+            -d "chat_id=$6356040267:AAFRn_Kb3M2BECcSMepIQfu6Blo2_L-5TQU" \
+            -d "text=Deployment completed successfully for commit ${{ github.sha }}!"
+
+
+
