@@ -387,7 +387,7 @@ def admin_login():
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes"/>
-<title>Admin Login 💖</title>
+<title>Admin Login</title>
 <script>
 (function(){{
   try{{
@@ -428,17 +428,10 @@ background:linear-gradient(135deg,var(--pink1),var(--pink2));font-size:14px}}
 </head>
 <body>
   <div class="card">
-    <div class="nav">
-      <div class="brand"><div class="logo">🔐</div><div>Admin</div></div>
-      <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
-        <span id="themeIcon">☀️</span><div class="switch"><div class="knob"></div></div>
-      </div>
-    </div>
-
     {msg_block}
 
-    <h1>Cute Admin Login 💖</h1>
-    <p>Only admin can see the quote list ✨</p>
+    <h1> Admin Login </h1>
+    <p>Only admin ng hah ✨</p>
 
     <form method="POST" action="/admin/login">
       <input name="username" placeholder="Username" required />
@@ -446,23 +439,8 @@ background:linear-gradient(135deg,var(--pink1),var(--pink2));font-size:14px}}
       <button class="btn" type="submit">🌸 Login</button>
     </form>
 
-    <a class="link" href="/">← Back home</a>
+    <a class="link" href="/">Back home</a>
   </div>
-
-<script>
-const root=document.documentElement,toggle=document.getElementById("themeToggle"),icon=document.getElementById("themeIcon");
-function applyTheme(t){{
-  const e=t==="dark";
-  e?root.setAttribute("data-theme","dark"):root.removeAttribute("data-theme");
-  icon.textContent=e?"🌙":"☀️";
-  try{{localStorage.setItem("theme",e?"dark":"light")}}catch(_{{}}){{}}
-  toggle.setAttribute("aria-pressed",String(e));
-}}
-const saved=(()=>{{try{{return localStorage.getItem("theme")}}catch(e){{return null}}}})();
-applyTheme(saved==="dark"?"dark":"light");
-toggle.addEventListener("click",()=>{{const t=root.getAttribute("data-theme")==="dark";applyTheme(t?"light":"dark")}});
-toggle.addEventListener("keydown",e=>{{if(e.key==="Enter"||e.key===" "){{e.preventDefault();toggle.click()}}}});
-</script>
 </body>
 </html>
 """
@@ -498,7 +476,7 @@ def admin_quotes():
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes"/>
-<title>Admin Quotes 💖</title>
+<title>Admin Quotes</title>
 <script>
 (function(){{
   try{{
@@ -541,19 +519,18 @@ th{{text-align:left;padding:10px 12px;border-bottom:1px solid rgba(0,0,0,.12);fo
 <body>
   <div class="card">
     <div class="nav">
-      <div class="brand"><div class="logo">📚</div><div>Admin Quotes</div></div>
+      <div class="brand"><div class="logo">📚</div><div>All-Quotes</div></div>
       <div class="right">
-        <a class="badge" href="/">🏠 Home</a>
-        <a class="badge" href="/admin/logout">🚪 Logout</a>
+        <a class="badge" href="/">Home</a>
+        <a class="badge" href="/admin/logout">Logout</a>
         <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
           <span id="themeIcon">☀️</span><div class="switch"><div class="knob"></div></div>
         </div>
       </div>
     </div>
 
-    {msg_block}
 
-    <h1>All Quotes 💖</h1>
+    <h1>All Quotes</h1>
     <p>Total: <b>{len(data)}</b> quotes</p>
 
     <div class="tableWrap">
@@ -572,20 +549,6 @@ th{{text-align:left;padding:10px 12px;border-bottom:1px solid rgba(0,0,0,.12);fo
     </div>
   </div>
 
-<script>
-const root=document.documentElement,toggle=document.getElementById("themeToggle"),icon=document.getElementById("themeIcon");
-function applyTheme(t){{
-  const e=t==="dark";
-  e?root.setAttribute("data-theme","dark"):root.removeAttribute("data-theme");
-  icon.textContent=e?"🌙":"☀️";
-  try{{localStorage.setItem("theme",e?"dark":"light")}}catch(_{{}}){{}}
-  toggle.setAttribute("aria-pressed",String(e));
-}}
-const saved=(()=>{{try{{return localStorage.getItem("theme")}}catch(e){{return null}}}})();
-applyTheme(saved==="dark"?"dark":"light");
-toggle.addEventListener("click",()=>{{const t=root.getAttribute("data-theme")==="dark";applyTheme(t?"light":"dark")}});
-toggle.addEventListener("keydown",e=>{{if(e.key==="Enter"||e.key===" "){{e.preventDefault();toggle.click()}}}});
-</script>
 </body>
 </html>
 """
