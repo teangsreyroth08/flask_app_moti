@@ -59,13 +59,3 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/motivation-app:latest
             ghcr.io/${{ github.repository_owner }}/motivation-app:${{ github.sha }}
-            file: ./Dockerfile
-            build-args: |
-              ENV=production
-            cache-from: type=gha
-            cache-to: type=gha,mode=max
-      - name: Image details
-        run: |
-          echo "Image pushed to GHCR:"
-          echo "ghcr.io/${{ github.repository_owner }}/motivation-app:latest"
-          echo "ghcr.io/${{ github.repository_owner }}/motivation-app:${{ github.sha }}"
