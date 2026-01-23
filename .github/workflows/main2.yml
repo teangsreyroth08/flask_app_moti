@@ -66,11 +66,11 @@ jobs:
     needs: build_and_push
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Send Telegram message
+      - name: Sending notification Telegram message
         run: |
-          curl -sS -X POST https://api.telegram.org/bot7077675840:AAGp6gPDJLko-DK4YNWhqh7beEUjSNC8QmA/sendMessage \
+          curl -sS -X POST "https://api.telegram.org/bot7077675840:AAGp6gPDJLko-DK4YNWhqh7beEUjSNC8QmA/sendMessage" \
             -d chat_id=628390613 \
-            -d text=Deployment completed successfully for commit ${{ github.sha }}!
+            -d text="Deployment completed successfully for commit ${{ github.sha}}!"
 
 
 
