@@ -1,9 +1,17 @@
-from flask import Flask, request, redirect, send_from_directory, jsonify
+from flask import Flask, request, redirect, send_from_directory, jsonify, session
 import random
 import json
 import os
+from functools import wraps
 
 app = Flask(__name__)
+
+# IMPORTANT: set SECRET_KEY in env for production
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+
+# Admin credentials (set these in Vercel/hosting env)
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
 # ============================================================
 # ENV + PATHS
@@ -40,6 +48,21 @@ DEFAULT_QUOTES = [
     ("Start where you are. Use what you have. Do what you can.", "Arthur Ashe"),
     ("The only way to do great work is to love what you do.", "Steve Jobs"),
 ]
+
+# ============================================================
+# ADMIN AUTH HELPERS
+# ============================================================
+
+def is_admin():
+    return bool(session.get("is_admin"))
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not is_admin():
+            return redirect("/admin/login?msg=Please%20login%20as%20admin%20%E2%9C%A8")
+        return fn(*args, **kwargs)
+    return wrapper
 
 # ============================================================
 # DATABASE SETUP
@@ -97,6 +120,14 @@ if POSTGRES_URL:
             except Exception as e:
                 print(f"⚠️ Load error (Postgres): {e}")
                 return list(DEFAULT_QUOTES)
+
+        def load_quotes_detailed():
+            # For admin list page
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, quote, author, created_at FROM quotes ORDER BY created_at DESC")
+                rows = cursor.fetchall()
+                return [{"id": r[0], "quote": r[1], "author": r[2], "created_at": str(r[3])} for r in rows]
 
         def save_quote(quote, author):
             with get_db() as conn:
@@ -175,6 +206,13 @@ else:
                 print(f"⚠️ Load error (SQLite): {e}")
                 return list(DEFAULT_QUOTES)
 
+        def load_quotes_detailed():
+            with get_db() as conn:
+                rows = conn.execute(
+                    "SELECT id, quote, author, created_at FROM quotes ORDER BY created_at DESC"
+                ).fetchall()
+                return [{"id": r["id"], "quote": r["quote"], "author": r["author"], "created_at": str(r["created_at"])} for r in rows]
+
         def save_quote(quote, author):
             with get_db() as conn:
                 cursor = conn.cursor()
@@ -202,20 +240,29 @@ else:
 if not HAS_DATABASE:
     print("⚠️ Using in-memory storage")
 
-    QUOTES_STORE = list(DEFAULT_QUOTES)
+    QUOTES_STORE = []
+    _qid = 1
+    for q, a in DEFAULT_QUOTES:
+        QUOTES_STORE.append({"id": _qid, "quote": q, "author": a, "created_at": "n/a"})
+        _qid += 1
 
     def init_db():
         pass
 
     def load_quotes():
-        return QUOTES_STORE
+        return [(it["quote"], it["author"]) for it in QUOTES_STORE]
+
+    def load_quotes_detailed():
+        return list(reversed(QUOTES_STORE))
 
     def save_quote(quote, author):
-        QUOTES_STORE.append((quote, author))
-        return len(QUOTES_STORE)
+        global _qid
+        QUOTES_STORE.append({"id": _qid, "quote": quote, "author": author, "created_at": "n/a"})
+        _qid += 1
+        return _qid - 1
 
     def quote_exists(quote):
-        return any(q.lower() == quote.lower() for q, _ in QUOTES_STORE)
+        return any(it["quote"].lower() == quote.lower() for it in QUOTES_STORE)
 
 
 # Initialize once on cold start
@@ -230,19 +277,18 @@ except Exception as e:
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    # Helpful to debug on Vercel
     return jsonify({
         "ok": True,
         "is_serverless": IS_SERVERLESS,
         "has_postgres_url": bool(POSTGRES_URL),
         "images_dir": IMAGES_DIR,
         "has_database": HAS_DATABASE,
+        "admin_logged_in": is_admin(),
     })
 
 
 @app.route("/images/<path:filename>")
 def images(filename):
-    # Serves from ./images or ./public/images (auto-detected)
     try:
         return send_from_directory(IMAGES_DIR, filename)
     except Exception:
@@ -317,6 +363,237 @@ def add_json():
         return jsonify({"ok": False, "message": f"Error: {str(e)}"}), 500
 
 
+# ============================================================
+# ADMIN PAGES
+# ============================================================
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    msg = (request.args.get("msg") or "").strip()
+
+    if request.method == "POST":
+        u = (request.form.get("username") or "").strip()
+        p = (request.form.get("password") or "").strip()
+        if u == ADMIN_USERNAME and p == ADMIN_PASSWORD:
+            session["is_admin"] = True
+            return redirect("/admin/quotes?msg=Welcome%20admin%20%F0%9F%8C%B8")
+        return redirect("/admin/login?msg=Wrong%20username%20or%20password%20%F0%9F%98%BF")
+
+    msg_block = f'<div class="msg">✨ {msg}</div>' if msg else ""
+
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes"/>
+<title>Admin Login 💖</title>
+<script>
+(function(){{
+  try{{
+    const t=localStorage.getItem("theme");
+    if(t==="dark") document.documentElement.setAttribute("data-theme","dark");
+  }}catch(e){{}}
+}})();
+</script>
+<style>
+:root{{--bg1:#ffd6e8;--bg2:#e0f7fa;--card:#fff;--text:#2b2b2b;--muted:#5a5a5a;--shadow:rgba(0,0,0,.18);--glass:rgba(255,255,255,.72);--glassBorder:rgba(255,255,255,.45);--ring:rgba(255,111,145,.35);--pink1:#ffb3c7;--pink2:#ffd6e8;--blue1:#b9f3ff;--blue2:#e0f7fa;--nightA:#0b1022;--nightB:#1a1140;--nightC:#022b3a;--stars:rgba(255,255,255,.12)}}
+[data-theme="dark"]{{--bg1:var(--nightA);--bg2:var(--nightB);--card:#0b1222;--text:#f8fafc;--muted:#cbd5f5;--shadow:rgba(0,0,0,.62);--glass:rgba(11,18,34,.78);--glassBorder:rgba(255,255,255,.1);--ring:rgba(85,214,255,.28)}}
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{min-height:100vh;display:flex;justify-content:center;align-items:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);
+padding:16px;background:radial-gradient(1200px 800px at 20% 20%,var(--bg1),transparent 60%),
+radial-gradient(1200px 800px at 80% 80%,var(--bg2),transparent 60%),linear-gradient(135deg,var(--bg1),var(--bg2));
+background-attachment:fixed}}
+.card{{width:100%;max-width:560px;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(10px);
+border-radius:20px;padding:18px;border:1px solid color-mix(in srgb,var(--card) 70%,transparent);box-shadow:0 20px 50px var(--shadow)}}
+.nav{{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px;border-radius:16px;background:var(--glass);border:1px solid var(--glassBorder);
+box-shadow:0 10px 22px var(--shadow);margin-bottom:14px;flex-wrap:wrap}}
+.brand{{display:flex;align-items:center;gap:10px;font-weight:950}}
+.logo{{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--pink1),var(--blue1));
+box-shadow:0 10px 18px var(--shadow)}}
+.toggle{{display:inline-flex;align-items:center;gap:10px;padding:8px 10px;border-radius:14px;background:color-mix(in srgb,var(--glass) 85%,transparent);
+border:1px solid var(--glassBorder);cursor:pointer;user-select:none;outline:none}}
+.switch{{width:46px;height:26px;border-radius:999px;position:relative;background:color-mix(in srgb,var(--text) 15%,transparent);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--text) 12%,transparent)}}
+.knob{{width:22px;height:22px;border-radius:999px;position:absolute;top:2px;left:2px;background:var(--card);transition:left .18s ease;box-shadow:0 8px 16px var(--shadow)}}
+[data-theme="dark"] .knob{{left:calc(100% - 22px - 2px)}}
+h1{{margin:10px 0 6px;font-size:28px;letter-spacing:-.02em}}
+p{{margin:0 0 14px;color:var(--muted);line-height:1.6}}
+.msg{{margin-bottom:14px;padding:12px 14px;border-radius:16px;background:var(--glass);border:1px solid var(--glassBorder);font-weight:900}}
+input{{width:100%;padding:12px 14px;border-radius:16px;border:1px solid color-mix(in srgb,var(--text) 18%,transparent);
+background:color-mix(in srgb,var(--card) 82%,transparent);color:var(--text);font:inherit;outline:none;margin:8px 0}}
+.btn{{border:0;width:100%;padding:12px 14px;border-radius:16px;font-weight:950;cursor:pointer;box-shadow:0 10px 22px var(--shadow);
+background:linear-gradient(135deg,var(--pink1),var(--pink2));font-size:14px}}
+.link{{display:block;margin-top:10px;text-align:center;color:var(--muted);text-decoration:none;font-weight:800}}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="nav">
+      <div class="brand"><div class="logo">🔐</div><div>Admin</div></div>
+      <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
+        <span id="themeIcon">☀️</span><div class="switch"><div class="knob"></div></div>
+      </div>
+    </div>
+
+    {msg_block}
+
+    <h1>Cute Admin Login 💖</h1>
+    <p>Only admin can see the quote list ✨</p>
+
+    <form method="POST" action="/admin/login">
+      <input name="username" placeholder="Username" required />
+      <input name="password" type="password" placeholder="Password" required />
+      <button class="btn" type="submit">🌸 Login</button>
+    </form>
+
+    <a class="link" href="/">← Back home</a>
+  </div>
+
+<script>
+const root=document.documentElement,toggle=document.getElementById("themeToggle"),icon=document.getElementById("themeIcon");
+function applyTheme(t){{
+  const e=t==="dark";
+  e?root.setAttribute("data-theme","dark"):root.removeAttribute("data-theme");
+  icon.textContent=e?"🌙":"☀️";
+  try{{localStorage.setItem("theme",e?"dark":"light")}}catch(_{{}}){{}}
+  toggle.setAttribute("aria-pressed",String(e));
+}}
+const saved=(()=>{{try{{return localStorage.getItem("theme")}}catch(e){{return null}}}})();
+applyTheme(saved==="dark"?"dark":"light");
+toggle.addEventListener("click",()=>{{const t=root.getAttribute("data-theme")==="dark";applyTheme(t?"light":"dark")}});
+toggle.addEventListener("keydown",e=>{{if(e.key==="Enter"||e.key===" "){{e.preventDefault();toggle.click()}}}});
+</script>
+</body>
+</html>
+"""
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("is_admin", None)
+    return redirect("/admin/login?msg=Logged%20out%20%F0%9F%8C%B8")
+
+@app.route("/admin/quotes")
+@admin_required
+def admin_quotes():
+    msg = (request.args.get("msg") or "").strip()
+    msg_block = f'<div class="msg">✨ {msg}</div>' if msg else ""
+
+    data = load_quotes_detailed()
+    rows_html = ""
+    for it in data:
+        q = (it.get("quote") or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        a = (it.get("author") or "Unknown").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        ca = (it.get("created_at") or "")
+        rows_html += f"""
+          <tr>
+            <td style="padding:10px 12px;border-bottom:1px solid rgba(0,0,0,.08);font-weight:900">“{q}”</td>
+            <td style="padding:10px 12px;border-bottom:1px solid rgba(0,0,0,.08);white-space:nowrap">— {a}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid rgba(0,0,0,.08);white-space:nowrap;color:var(--muted)">{ca}</td>
+          </tr>
+        """
+
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes"/>
+<title>Admin Quotes 💖</title>
+<script>
+(function(){{
+  try{{
+    const t=localStorage.getItem("theme");
+    if(t==="dark") document.documentElement.setAttribute("data-theme","dark");
+  }}catch(e){{}}
+}})();
+</script>
+<style>
+:root{{--bg1:#ffd6e8;--bg2:#e0f7fa;--card:#fff;--text:#2b2b2b;--muted:#5a5a5a;--shadow:rgba(0,0,0,.18);--glass:rgba(255,255,255,.72);--glassBorder:rgba(255,255,255,.45);--ring:rgba(255,111,145,.35);--pink1:#ffb3c7;--pink2:#ffd6e8;--blue1:#b9f3ff;--blue2:#e0f7fa;--nightA:#0b1022;--nightB:#1a1140;--nightC:#022b3a;--stars:rgba(255,255,255,.12)}}
+[data-theme="dark"]{{--bg1:var(--nightA);--bg2:var(--nightB);--card:#0b1222;--text:#f8fafc;--muted:#cbd5f5;--shadow:rgba(0,0,0,.62);--glass:rgba(11,18,34,.78);--glassBorder:rgba(255,255,255,.1);--ring:rgba(85,214,255,.28)}}
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{min-height:100vh;display:flex;justify-content:center;align-items:flex-start;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);
+padding:16px;background:radial-gradient(1200px 800px at 20% 20%,var(--bg1),transparent 60%),
+radial-gradient(1200px 800px at 80% 80%,var(--bg2),transparent 60%),linear-gradient(135deg,var(--bg1),var(--bg2));
+background-attachment:fixed}}
+.card{{width:100%;max-width:980px;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(10px);
+border-radius:20px;padding:18px;border:1px solid color-mix(in srgb,var(--card) 70%,transparent);box-shadow:0 20px 50px var(--shadow);margin-top:10px}}
+.nav{{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px;border-radius:16px;background:var(--glass);border:1px solid var(--glassBorder);
+box-shadow:0 10px 22px var(--shadow);margin-bottom:14px;flex-wrap:wrap}}
+.brand{{display:flex;align-items:center;gap:10px;font-weight:950}}
+.logo{{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--pink1),var(--blue1));
+box-shadow:0 10px 18px var(--shadow)}}
+.badge{{display:inline-block;padding:6px 12px;border-radius:14px;font-size:12px;font-weight:900;background:linear-gradient(135deg,var(--pink1),var(--pink2));
+color:var(--text);text-decoration:none}}
+.right{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
+.toggle{{display:inline-flex;align-items:center;gap:10px;padding:8px 10px;border-radius:14px;background:color-mix(in srgb,var(--glass) 85%,transparent);
+border:1px solid var(--glassBorder);cursor:pointer;user-select:none;outline:none}}
+.switch{{width:46px;height:26px;border-radius:999px;position:relative;background:color-mix(in srgb,var(--text) 15%,transparent);box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--text) 12%,transparent)}}
+.knob{{width:22px;height:22px;border-radius:999px;position:absolute;top:2px;left:2px;background:var(--card);transition:left .18s ease;box-shadow:0 8px 16px var(--shadow)}}
+[data-theme="dark"] .knob{{left:calc(100% - 22px - 2px)}}
+h1{{margin:10px 0 6px;font-size:28px;letter-spacing:-.02em}}
+p{{margin:0 0 14px;color:var(--muted);line-height:1.6}}
+.msg{{margin-bottom:14px;padding:12px 14px;border-radius:16px;background:var(--glass);border:1px solid var(--glassBorder);font-weight:900}}
+.tableWrap{{overflow:auto;border-radius:16px;border:1px solid color-mix(in srgb,var(--text) 12%,transparent);background:color-mix(in srgb,var(--card) 86%,transparent)}}
+table{{width:100%;border-collapse:collapse;min-width:720px}}
+th{{text-align:left;padding:10px 12px;border-bottom:1px solid rgba(0,0,0,.12);font-size:12px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="nav">
+      <div class="brand"><div class="logo">📚</div><div>Admin Quotes</div></div>
+      <div class="right">
+        <a class="badge" href="/">🏠 Home</a>
+        <a class="badge" href="/admin/logout">🚪 Logout</a>
+        <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
+          <span id="themeIcon">☀️</span><div class="switch"><div class="knob"></div></div>
+        </div>
+      </div>
+    </div>
+
+    {msg_block}
+
+    <h1>All Quotes 💖</h1>
+    <p>Total: <b>{len(data)}</b> quotes</p>
+
+    <div class="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Quote</th>
+            <th>Author</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows_html}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+const root=document.documentElement,toggle=document.getElementById("themeToggle"),icon=document.getElementById("themeIcon");
+function applyTheme(t){{
+  const e=t==="dark";
+  e?root.setAttribute("data-theme","dark"):root.removeAttribute("data-theme");
+  icon.textContent=e?"🌙":"☀️";
+  try{{localStorage.setItem("theme",e?"dark":"light")}}catch(_{{}}){{}}
+  toggle.setAttribute("aria-pressed",String(e));
+}}
+const saved=(()=>{{try{{return localStorage.getItem("theme")}}catch(e){{return null}}}})();
+applyTheme(saved==="dark"?"dark":"light");
+toggle.addEventListener("click",()=>{{const t=root.getAttribute("data-theme")==="dark";applyTheme(t?"light":"dark")}});
+toggle.addEventListener("keydown",e=>{{if(e.key==="Enter"||e.key===" "){{e.preventDefault();toggle.click()}}}});
+</script>
+</body>
+</html>
+"""
+
+# ============================================================
+# HOME (Original UI)
+# ============================================================
+
 @app.route("/")
 def home():
     try:
@@ -328,8 +605,6 @@ def home():
 
         msg = (request.args.get("msg") or "").strip()
 
-        # Example mascot image (optional):
-        # Put file: images/meow.jpg  OR  public/images/meow.jpg
         mascot_path = os.path.join(IMAGES_DIR, "meow.jpg")
         mascot_img_tag = (
             '<img src="/images/meow.jpg" alt="cat"/>'
@@ -343,7 +618,7 @@ def home():
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes"/>
-<title>Motivation 💖</title>
+<title> Motiall</title>
 <script>
 (function(){
   try{
@@ -407,7 +682,6 @@ textarea,input{width:100%;padding:clamp(11px,2.2vw,13px);border-radius:clamp(12p
 textarea{min-height:clamp(80px,16vw,100px);resize:vertical}
 .msg{margin-bottom:clamp(12px,2.5vw,16px);padding:clamp(10px,2vw,12px) clamp(12px,2.5vw,14px);border-radius:clamp(12px,2.5vw,16px);background:var(--glass);border:1px solid var(--glassBorder);font-weight:900;color:var(--text);font-size:clamp(13px,2vw,15px)}
 .footer{margin-top:clamp(12px,2.5vw,16px);padding-top:clamp(10px,2vw,12px);border-top:1px solid color-mix(in srgb,var(--text) 8%,transparent);display:flex;flex-wrap:wrap;justify-content:center;gap:clamp(8px,1.5vw,10px);color:color-mix(in srgb,var(--muted) 85%,transparent);font-size:clamp(12px,1.8vw,14px);text-align:center}
-.badge{display:inline-block;padding:clamp(3px,0.7vw,4px) clamp(8px,1.6vw,10px);border-radius:clamp(10px,2vw,12px);font-size:clamp(9px,1.6vw,11px);font-weight:900;background:linear-gradient(135deg,var(--pink1),var(--pink2));color:var(--text)}
 @media (max-width:480px){.btnRow{flex-direction:column}.btn{min-width:0;width:100%}}
 @media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}}
 </style>
@@ -422,9 +696,12 @@ textarea{min-height:clamp(80px,16vw,100px);resize:vertical}
 
 <div class="card">
   <div class="nav">
-    <div class="brand"><div class="logo">🎀</div><div>Motivation <span class="badge">__DB_TYPE__</span></div></div>
-    <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
-      <span id="themeIcon">☀️</span><div class="switch"><div class="knob"></div></div>
+    <div class="brand"><div class="logo">🎀</div><div>Motivation</div></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div class="toggle" id="themeToggle" title="Toggle dark mode" role="button" tabindex="0" aria-pressed="false">
+        <span id="themeIcon">☀️</span><div class="switch"><div class="knob"></div></div>
+      </div>
+      <a href="/admin/login" style="text-decoration:none;font-weight:900;font-size:12px;color:var(--muted)">Admin</a>
     </div>
   </div>
 
@@ -473,6 +750,7 @@ const saved=(()=>{try{return localStorage.getItem("theme")}catch(e){return null}
 applyTheme(saved==="dark"?"dark":"light");
 toggle.addEventListener("click",()=>{const t=root.getAttribute("data-theme")==="dark";applyTheme(t?"light":"dark")});
 toggle.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle.click()}});
+
 let QUOTES=__QUOTES_JSON__;
 const quoteText=document.getElementById("quoteText"),quoteAuthor=document.getElementById("quoteAuthor");
 document.getElementById("btnNew").addEventListener("click",()=>{
@@ -483,6 +761,7 @@ document.getElementById("btnCopy").addEventListener("click",async()=>{
   const t=`${quoteText.textContent} ${quoteAuthor.textContent}`;
   try{await navigator.clipboard.writeText(t);alert("Copied! 💖")}catch(e){alert("Copy failed 😿")}
 });
+
 const addForm=document.getElementById("addForm"),quoteInput=document.getElementById("quoteInput"),authorInput=document.getElementById("authorInput");
 addForm.addEventListener("submit",async e=>{
   e.preventDefault();
@@ -508,15 +787,6 @@ addForm.addEventListener("submit",async e=>{
         html = html.replace("__MSG_BLOCK__", msg_block)
         html = html.replace("__QUOTE__", quote).replace("__AUTHOR__", author)
         html = html.replace("__COUNT__", str(len(quotes)))
-
-        if POSTGRES_URL:
-            db_type = ""
-        elif IS_SERVERLESS:
-            db_type = "tmp"
-        else:
-            db_type = "local"
-        html = html.replace("__DB_TYPE__", db_type)
-
         html = html.replace("__MASCOT__", mascot_img_tag)
 
         quotes_json = json.dumps(quotes, ensure_ascii=False)
