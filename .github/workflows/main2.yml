@@ -77,12 +77,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Trivy
-        uses: aquasecurity/trivy-action@v1
+        uses: aquasecurity/trivy-action@v0.68.2
         with:
-          version: '0.35.0'
+          version: '0.68.2'
 
       - name: Scan image
         run: |
           trivy image --exit-code 1 --severity HIGH,CRITICAL ghcr.io/${{ github.repository_owner }}/motivation-app:${{ github.sha }}
 
-          
+
