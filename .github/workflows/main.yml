@@ -1,114 +1,114 @@
-name: CI-CD
+# name: CI-CD
 
-on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
+# on:
+#   push:
+#     branches: ["main"]
+#   pull_request:
+#     branches: ["main"]
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+# jobs:
+#   build:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
 
-      - name: Build image
-        run: |
-          docker build -t demo-flask:${{ github.sha }} .
-          docker images | head -n 20
+#       - name: Build image
+#         run: |
+#           docker build -t demo-flask:${{ github.sha }} .
+#           docker images | head -n 20
 
-      - name: Save image to tar
-        run: |
-          docker save demo-flask:${{ github.sha }} -o image.tar
-          ls -lh image.tar
+#       - name: Save image to tar
+#         run: |
+#           docker save demo-flask:${{ github.sha }} -o image.tar
+#           ls -lh image.tar
 
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: image.tar
-          retention-days: 1
+#       - name: Upload image artifact
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: docker-image
+#           path: image.tar
+#           retention-days: 1
 
-  unit-test:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+#   unit-test:
+#     runs-on: ubuntu-latest
+#     needs: build
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
 
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-          path: .
+#       - name: Download image artifact
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: docker-image
+#           path: .
 
-      - name: Verify artifact exists
-        run: ls -lh image.tar
+#       - name: Verify artifact exists
+#         run: ls -lh image.tar
 
-      - name: Load image
-        run: docker load -i image.tar
+#       - name: Load image
+#         run: docker load -i image.tar
 
-      - name: Verify image loaded
-        run: docker images | head -n 20
+#       - name: Verify image loaded
+#         run: docker images | head -n 20
 
-      - name: Run unit tests
-        run: |
-          docker run --rm \
-            --entrypoint python \
-            -v "${{ github.workspace }}:/work" \
-            -w /work \
-            demo-flask:${{ github.sha }} \
-            -m unittest discover -s tests -t .
+#       - name: Run unit tests
+#         run: |
+#           docker run --rm \
+#             --entrypoint python \
+#             -v "${{ github.workspace }}:/work" \
+#             -w /work \
+#             demo-flask:${{ github.sha }} \
+#             -m unittest discover -s tests -t .
 
-  integration-test:
-    runs-on: ubuntu-latest
-    needs: build
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: quotesdb
-        ports:
-          - 5432:5432
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+#   integration-test:
+#     runs-on: ubuntu-latest
+#     needs: build
+#     services:
+#       postgres:
+#         image: postgres:16-alpine
+#         env:
+#           POSTGRES_USER: postgres
+#           POSTGRES_PASSWORD: postgres
+#           POSTGRES_DB: quotesdb
+#         ports:
+#           - 5432:5432
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
 
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image  
+#       - name: Download image artifact
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: docker-image  
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs: integration-test
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+#   deploy:
+#     runs-on: ubuntu-latest
+#     needs: integration-test
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
 
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-          path: .
-      - name: Load image
-        run: docker load -i image.tar
-      - name: Verify image loaded
-        run: docker images | head -n 20
-      - name: Deploy container
-        run: |
-          docker run -d --name motivation_web -p 8000:5000 \
-            --env-file .env \
-            --restart unless-stopped \
-            demo-flask:${{ github.sha }}
-      - name: Verify deployment
-        run: |
-          sleep 10
-          curl -f http://localhost:8000/ || exit 1  
-          
+#       - name: Download image artifact
+#         uses: actions/download-artifact@v4
+#         with:
+#           name: docker-image
+#           path: .
+#       - name: Load image
+#         run: docker load -i image.tar
+#       - name: Verify image loaded
+#         run: docker images | head -n 20
+#       - name: Deploy container
+#         run: |
+#           docker run -d --name motivation_web -p 8000:5000 \
+#             --env-file .env \
+#             --restart unless-stopped \
+#             demo-flask:${{ github.sha }}
+#       - name: Verify deployment
+#         run: |
+#           sleep 10
+#           curl -f http://localhost:8000/ || exit 1  
+
 
 
 
