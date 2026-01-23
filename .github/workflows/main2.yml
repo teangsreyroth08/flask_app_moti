@@ -1,13 +1,14 @@
-name: CI/CD pipeline
+name: CI/CD
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
   pull_request:
 
 permissions:
   contents: read
-  packages: write   # needed for GHCR push
+  packages: write
 
 jobs:
   unit_test:
@@ -20,20 +21,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # If you have tests:
           pip install pytest
 
       - name: Run tests
-        run: |
-          pytest -q
-        # If you don't have tests yet, replace with:
-        # run: python -m compileall .
+        run: pytest -q
 
   build_and_push:
     name: Build & Push Image
@@ -44,21 +41,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Log in to GHCR
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
+      - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/motivation-app:latest
