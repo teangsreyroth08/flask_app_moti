@@ -13,22 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# 1. Create a non-root user
-RUN useradd -m myuser
-
 # Install Python dependencies first (better caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
-
-# 2. Switch to that user
-USER myuser
-
-# 3. Add a Healthcheck (Checkov loves this)
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:5000/ || exit 1
 
 # Flask environment
 ENV FLASK_APP=api.index
