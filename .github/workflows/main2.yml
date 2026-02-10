@@ -98,7 +98,7 @@ jobs:
                 ******
                 Author: ${{ github.actor }}
                 Commit: ${GITHUB_SHA::7}
-                Time (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')
+                Time (ICT): $(TZ='Asia/Phnom_Penh' date '+%Y-%m-%d %H:%M:%S')"
                 ******"
 
 
