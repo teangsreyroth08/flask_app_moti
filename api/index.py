@@ -36,18 +36,18 @@ PUBLIC_IMAGES_DIR = os.path.join(os.path.dirname(BASE_DIR), "public", "images")
 # - else -> use /images (your local structure)
 IMAGES_DIR = PUBLIC_IMAGES_DIR if os.path.isdir(PUBLIC_IMAGES_DIR) else LOCAL_IMAGES_DIR
 
-DEFAULT_QUOTES = [
-    ("Believe you can and you're halfway there.", "Theodore Roosevelt"),
-    ("Small steps every day become big results.", "Unknown"),
-    ("Discipline beats motivation when motivation is low.", "Unknown"),
-    ("Your future is created by what you do today, not tomorrow.", "Robert Kiyosaki"),
-    ("Don't watch the clock; do what it does. Keep going.", "Sam Levenson"),
-    ("You don't have to be perfect to be proud.", "Unknown"),
-    ("Progress, not perfection.", "Unknown"),
-    ("It always seems impossible until it's done.", "Nelson Mandela"),
-    ("Start where you are. Use what you have. Do what you can.", "Arthur Ashe"),
-    ("The only way to do great work is to love what you do.", "Steve Jobs"),
-]
+# DEFAULT_QUOTES = [
+#     ("Believe you can and you're halfway there.", "Theodore Roosevelt"),
+#     ("Small steps every day become big results.", "Unknown"),
+#     ("Discipline beats motivation when motivation is low.", "Unknown"),
+#     ("Your future is created by what you do today, not tomorrow.", "Robert Kiyosaki"),
+#     ("Don't watch the clock; do what it does. Keep going.", "Sam Levenson"),
+#     ("You don't have to be perfect to be proud.", "Unknown"),
+#     ("Progress, not perfection.", "Unknown"),
+#     ("It always seems impossible until it's done.", "Nelson Mandela"),
+#     ("Start where you are. Use what you have. Do what you can.", "Arthur Ashe"),
+#     ("The only way to do great work is to love what you do.", "Steve Jobs"),
+# ]
 
 # ============================================================
 # ADMIN AUTH HELPERS
@@ -97,16 +97,7 @@ if POSTGRES_URL:
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                     """)
-                    cursor.execute("SELECT COUNT(*) FROM quotes")
-                    count = cursor.fetchone()[0]
-
-                    if count == 0:
-                        for quote, author in DEFAULT_QUOTES:
-                            cursor.execute(
-                                "INSERT INTO quotes (quote, author, is_default) VALUES (%s, %s, TRUE) "
-                                "ON CONFLICT (quote) DO NOTHING",
-                                (quote, author),
-                            )
+                    # Removed the block that checks count and inserts DEFAULT_QUOTES
                     conn.commit()
             except Exception as e:
                 print(f"⚠️ DB init error (Postgres): {e}")
@@ -119,7 +110,7 @@ if POSTGRES_URL:
                     return [(row[0], row[1]) for row in cursor.fetchall()]
             except Exception as e:
                 print(f"⚠️ Load error (Postgres): {e}")
-                return list(DEFAULT_QUOTES)
+                return [] # No longer returns DEFAULT_QUOTES on error
 
         def load_quotes_detailed():
             # For admin list page
@@ -176,35 +167,27 @@ else:
                     cursor = conn.cursor()
                     cursor.execute("""
                         CREATE TABLE IF NOT EXISTS quotes (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            id SERIAL PRIMARY KEY,
                             quote TEXT NOT NULL UNIQUE,
                             author TEXT NOT NULL DEFAULT 'Unknown',
-                            is_default BOOLEAN NOT NULL DEFAULT 0,
+                            is_default BOOLEAN NOT NULL DEFAULT FALSE,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                     """)
-                    cursor.execute("SELECT COUNT(*) as count FROM quotes")
-                    count = cursor.fetchone()["count"]
-
-                    if count == 0:
-                        for quote, author in DEFAULT_QUOTES:
-                            cursor.execute(
-                                "INSERT OR IGNORE INTO quotes (quote, author, is_default) VALUES (?, ?, 1)",
-                                (quote, author),
-                            )
+                    # Removed the block that checks count and inserts DEFAULT_QUOTES
                     conn.commit()
             except Exception as e:
-                print(f"⚠️ DB init error (SQLite): {e}")
+                print(f"⚠️ DB init error (Postgres): {e}")
 
         def load_quotes():
             try:
                 with get_db() as conn:
                     cursor = conn.cursor()
                     cursor.execute("SELECT quote, author FROM quotes ORDER BY created_at ASC")
-                    return [(row["quote"], row["author"]) for row in cursor.fetchall()]
+                    return [(row[0], row[1]) for row in cursor.fetchall()]
             except Exception as e:
-                print(f"⚠️ Load error (SQLite): {e}")
-                return list(DEFAULT_QUOTES)
+                print(f"⚠️ Load error (Postgres): {e}")
+                return [] # No longer returns DEFAULT_QUOTES on error
 
         def load_quotes_detailed():
             with get_db() as conn:
@@ -240,7 +223,7 @@ else:
 if not HAS_DATABASE:
     print("⚠️ Using in-memory storage")
 
-    QUOTES_STORE = []
+    QUOTES_STORE = [] # Start with an empty list
     _qid = 1
     for q, a in DEFAULT_QUOTES:
         QUOTES_STORE.append({"id": _qid, "quote": q, "author": a, "created_at": "n/a"})
