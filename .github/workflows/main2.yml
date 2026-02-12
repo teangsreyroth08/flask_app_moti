@@ -60,18 +60,18 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/motivation-app:latest
             ghcr.io/${{ github.repository_owner }}/motivation-app:${{ github.sha }}
   
-  # docker-security:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v3
+  docker-security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-  #     - name: Run Checkov on Dockerfile
-  #       uses: bridgecrewio/checkov-action@master
-  #       with:
-  #         directory: .
-  #         framework: dockerfile # Specific mode for Docker
-  #         soft_fail: false # Fail the build on errors
+      - name: Run Checkov on Dockerfile
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: dockerfile # Specific mode for Docker
+          soft_fail: false # Fail the build on errors
 
   Notification:
     name: Notify Telegram
