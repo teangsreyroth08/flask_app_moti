@@ -36,18 +36,18 @@ PUBLIC_IMAGES_DIR = os.path.join(os.path.dirname(BASE_DIR), "public", "images")
 # - else -> use /images (your local structure)
 IMAGES_DIR = PUBLIC_IMAGES_DIR if os.path.isdir(PUBLIC_IMAGES_DIR) else LOCAL_IMAGES_DIR
 
-# DEFAULT_QUOTES = [
-#     ("Believe you can and you're halfway there.", "Theodore Roosevelt"),
-#     ("Small steps every day become big results.", "Unknown"),
-#     ("Discipline beats motivation when motivation is low.", "Unknown"),
-#     ("Your future is created by what you do today, not tomorrow.", "Robert Kiyosaki"),
-#     ("Don't watch the clock; do what it does. Keep going.", "Sam Levenson"),
-#     ("You don't have to be perfect to be proud.", "Unknown"),
-#     ("Progress, not perfection.", "Unknown"),
-#     ("It always seems impossible until it's done.", "Nelson Mandela"),
-#     ("Start where you are. Use what you have. Do what you can.", "Arthur Ashe"),
-#     ("The only way to do great work is to love what you do.", "Steve Jobs"),
-# ]
+DEFAULT_QUOTES = [
+    ("Believe you can and you're halfway there.", "Theodore Roosevelt"),
+    ("Small steps every day become big results.", "Unknown"),
+    ("Discipline beats motivation when motivation is low.", "Unknown"),
+    ("Your future is created by what you do today, not tomorrow.", "Robert Kiyosaki"),
+    ("Don't watch the clock; do what it does. Keep going.", "Sam Levenson"),
+    ("You don't have to be perfect to be proud.", "Unknown"),
+    ("Progress, not perfection.", "Unknown"),
+    ("It always seems impossible until it's done.", "Nelson Mandela"),
+    ("Start where you are. Use what you have. Do what you can.", "Arthur Ashe"),
+    ("The only way to do great work is to love what you do.", "Steve Jobs"),
+]
 
 # ============================================================
 # ADMIN AUTH HELPERS
@@ -225,6 +225,7 @@ if not HAS_DATABASE:
 
     QUOTES_STORE = [] # Start with an empty list
     _qid = 1
+
     for q, a in DEFAULT_QUOTES:
         QUOTES_STORE.append({"id": _qid, "quote": q, "author": a, "created_at": "n/a"})
         _qid += 1
